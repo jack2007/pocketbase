@@ -64,7 +64,8 @@ func HandleEnroll(e *core.RequestEvent) error {
 		if err != nil {
 			return err
 		}
-		if txNode.GetString("enroll_status") != "active" {
+		if txNode.GetString("enroll_status") != "active" ||
+			!centercrypto.VerifySecret(txNode.GetString("enroll_secret_hash"), request.EnrollSecret) {
 			return errInvalidSession
 		}
 
