@@ -158,7 +158,8 @@ func HandleRefresh(e *core.RequestEvent) error {
 		return invalidCredentials(e)
 	}
 	if err != nil {
-		return err
+		e.App.Logger().Error("agent session refresh failed", "error", err)
+		return invalidCredentials(e)
 	}
 	return e.JSON(http.StatusOK, response)
 }

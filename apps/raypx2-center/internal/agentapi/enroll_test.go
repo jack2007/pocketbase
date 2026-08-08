@@ -13,6 +13,7 @@ import (
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 func TestHandleEnrollCreatesSessionUpdatesNodeAndAudits(t *testing.T) {
@@ -101,21 +102,69 @@ func TestHandleEnrollHidesValidationFailureAndAudits(t *testing.T) {
 	assertAuditCount(t, app, node.Id, 1)
 }
 
-func TestHandleRefreshRotatesValidSessionToken(t *testing.T) {
-	app, node, secret := newEnrollTestApp(t)
-	enrollResponse := performJSONRequest(t, app, agentapi.HandleEnroll, nil, map[string]any{
-		"node_key":      node.GetString("node_key"),
-		"enroll_secret": secret,
-	})
-	var enrolled struct {
-		Token string `json:"token"`
+func TestHandleRefreshRejectsInvalidBearer(t *testing.T) {
+	app, _, _ := newEnrollTestApp(t)
+
+	cases := []struct {
+		name    string
+		headers map[string]string
+	}{
+		{"missing authorization", nil},
+		{"malformed authorization", map[string]string{"Authorization": "not-bearer"}},
+		{"wrong token", map[string]string{"Authorization": "Bearer wrong-token"}},
 	}
-	if err := json.Unmarshal(enrollResponse.Body.Bytes(), &enrolled); err != nil {
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := performJSONRequest(t, app, agentapi.HandleRefresh, tc.headers, nil)
+			assertInvalidCredentials(t, response)
+		})
+	}
+}
+
+func TestHandleRefreshRejectsExpiredSession(t *testing.T) {
+	app, node, secret := newEnrollTestApp(t)
+	token := enrollAndGetToken(t, app, node, secret)
+
+	sessions, err := app.FindRecordsByFilter("agent_sessions", "node = {:node}", "", 10, 0, mapParams("node", node.Id))
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %d, err = %v", len(sessions), err)
+	}
+	sessions[0].Set("expires_at", types.NowDateTime().Add(-time.Hour))
+	if err := app.Save(sessions[0]); err != nil {
 		t.Fatal(err)
 	}
 
+	response := performJSONRequest(t, app, agentapi.HandleRefresh, map[string]string{
+		"Authorization": "Bearer " + token,
+	}, nil)
+	assertInvalidCredentials(t, response)
+}
+
+func TestHandleRefreshRejectsRevokedSession(t *testing.T) {
+	app, node, secret := newEnrollTestApp(t)
+	token := enrollAndGetToken(t, app, node, secret)
+
+	sessions, err := app.FindRecordsByFilter("agent_sessions", "node = {:node}", "", 10, 0, mapParams("node", node.Id))
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("sessions = %d, err = %v", len(sessions), err)
+	}
+	sessions[0].Set("revoked_at", types.NowDateTime())
+	if err := app.Save(sessions[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	response := performJSONRequest(t, app, agentapi.HandleRefresh, map[string]string{
+		"Authorization": "Bearer " + token,
+	}, nil)
+	assertInvalidCredentials(t, response)
+}
+
+func TestHandleRefreshRotatesValidSessionToken(t *testing.T) {
+	app, node, secret := newEnrollTestApp(t)
+	enrolledToken := enrollAndGetToken(t, app, node, secret)
+
 	refreshResponse := performJSONRequest(t, app, agentapi.HandleRefresh, map[string]string{
-		"Authorization": "Bearer " + enrolled.Token,
+		"Authorization": "Bearer " + enrolledToken,
 	}, nil)
 	if refreshResponse.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", refreshResponse.Code, refreshResponse.Body)
@@ -126,7 +175,7 @@ func TestHandleRefreshRotatesValidSessionToken(t *testing.T) {
 	if err := json.Unmarshal(refreshResponse.Body.Bytes(), &refreshed); err != nil {
 		t.Fatal(err)
 	}
-	if refreshed.Token == "" || refreshed.Token == enrolled.Token {
+	if refreshed.Token == "" || refreshed.Token == enrolledToken {
 		t.Fatalf("token was not rotated: %q", refreshed.Token)
 	}
 
@@ -134,11 +183,40 @@ func TestHandleRefreshRotatesValidSessionToken(t *testing.T) {
 	if err != nil || len(sessions) != 1 {
 		t.Fatalf("sessions = %d, err = %v", len(sessions), err)
 	}
-	if centercrypto.VerifySecret(sessions[0].GetString("token_hash"), enrolled.Token) {
+	if centercrypto.VerifySecret(sessions[0].GetString("token_hash"), enrolledToken) {
 		t.Fatal("old token still matches stored hash")
 	}
 	if !centercrypto.VerifySecret(sessions[0].GetString("token_hash"), refreshed.Token) {
 		t.Fatal("new token does not match stored hash")
+	}
+}
+
+func enrollAndGetToken(t *testing.T, app core.App, node *core.Record, secret string) string {
+	t.Helper()
+
+	response := performJSONRequest(t, app, agentapi.HandleEnroll, nil, map[string]any{
+		"node_key":      node.GetString("node_key"),
+		"enroll_secret": secret,
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("enroll status = %d, body = %s", response.Code, response.Body)
+	}
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	return body.Token
+}
+
+func assertInvalidCredentials(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+	if got := response.Body.String(); got != "{\"message\":\"invalid credentials\"}\n" {
+		t.Fatalf("body = %q", got)
 	}
 }
 
