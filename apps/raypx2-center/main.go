@@ -1,15 +1,23 @@
 package main
 
 import (
+	"embed"
+	"io/fs"
 	"log"
 
 	"github.com/pocketbase/pocketbase"
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agentapi"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agenthub"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/centerapi"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/collections"
 	"github.com/pocketbase/pocketbase/core"
 )
+
+//go:embed all:ui/dist
+var embeddedUI embed.FS
+
+var uiDist, _ = fs.Sub(embeddedUI, "ui/dist")
 
 func main() {
 	app := pocketbase.New()
@@ -30,10 +38,15 @@ func main() {
 		center.POST("/nodes", centerAPI.HandleCreateNode)
 		center.GET("/nodes", centerAPI.HandleListNodes)
 		center.POST("/nodes/{node_key}/proxy", centerAPI.HandleProxy)
+		bindUIRoutes(e)
 		return e.Next()
 	})
 
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func bindUIRoutes(e *core.ServeEvent) {
+	e.Router.GET("/app/{path...}", apis.Static(uiDist, true))
 }
