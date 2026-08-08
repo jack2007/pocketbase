@@ -121,7 +121,7 @@ func TestHandleWSWelcomeAndPingPong(t *testing.T) {
 
 	token := createWSTestSession(t, app, node)
 	ts := newWSIntegrationServer(t, app)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -135,26 +135,25 @@ func TestHandleWSWelcomeAndPingPong(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close(websocket.StatusNormalClosure, "test done")
+	t.Cleanup(func() {
+		_ = conn.Close(websocket.StatusNormalClosure, "test done")
+	})
 	if resp.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusSwitchingProtocols)
 	}
 
+	welcomeCtx, welcomeCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer welcomeCancel()
 	var welcome protocol.Frame
-	if err := wsjson.Read(ctx, conn, &welcome); err != nil {
-		t.Fatal(err)
+	if err := wsjson.Read(welcomeCtx, conn, &welcome); err != nil {
+		t.Fatalf("read welcome: %v", err)
 	}
 	if welcome.Type != "welcome" {
 		t.Fatalf("frame type = %q, want welcome", welcome.Type)
 	}
 
-	updated, err := app.FindRecordById("nodes", node.Id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !updated.GetBool("online") {
-		t.Fatal("node should be marked online after welcome")
-	}
+	nodeKey := node.GetString("node_key")
+	waitForWSReady(t, app, node.Id, nodeKey, testHub, 2*time.Second)
 
 	pingID := "integration-ping"
 	if err := wsjson.Write(ctx, conn, protocol.Frame{
@@ -166,13 +165,32 @@ func TestHandleWSWelcomeAndPingPong(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pongCtx, pongCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer pongCancel()
 	var pong protocol.Frame
-	if err := wsjson.Read(ctx, conn, &pong); err != nil {
-		t.Fatal(err)
+	if err := wsjson.Read(pongCtx, conn, &pong); err != nil {
+		t.Fatalf("read pong: %v", err)
 	}
 	if pong.Type != "pong" || pong.ID != pingID {
 		t.Fatalf("pong = %#v, want type pong id %q", pong, pingID)
 	}
+}
+
+func waitForWSReady(t *testing.T, app core.App, nodeID, nodeKey string, hub *agenthub.Hub, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !hub.HasConnection(nodeKey) {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		updated, err := app.FindRecordById("nodes", nodeID)
+		if err == nil && updated.GetBool("online") {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("node should be registered in hub and marked online after welcome")
 }
 
 func createWSTestSession(t *testing.T, app core.App, node *core.Record) string {

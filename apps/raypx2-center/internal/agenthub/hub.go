@@ -79,6 +79,13 @@ func (h *Hub) IsCurrent(nodeKey, connID string) bool {
 	return current != nil && current.ID() == connID
 }
 
+func (h *Hub) HasConnection(nodeKey string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	_, ok := h.connections[nodeKey]
+	return ok
+}
+
 func (h *Hub) Send(nodeKey string, frame protocol.Frame) error {
 	h.mu.RLock()
 	conn := h.connections[nodeKey]
