@@ -23,7 +23,7 @@ func EnsureCollections(app core.App) error {
 			&core.TextField{Name: "agent_version"},
 			&core.DateField{Name: "last_seen_at"},
 			&core.BoolField{Name: "online"},
-			relation("created_by", superusers, false),
+			relation("created_by", superusers, false, false),
 		)
 		collection.AddIndex("idx_nodes_node_key", true, "node_key", "")
 	})
@@ -33,7 +33,7 @@ func EnsureCollections(app core.App) error {
 
 	if _, err := ensure(app, "agent_sessions", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("node", nodes, true),
+			relation("node", nodes, true, true),
 			&core.TextField{Name: "token_hash", Hidden: true, Required: true},
 			&core.DateField{Name: "expires_at", Required: true},
 			&core.DateField{Name: "revoked_at"},
@@ -46,7 +46,7 @@ func EnsureCollections(app core.App) error {
 
 	if _, err := ensure(app, "node_status", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("node", nodes, true),
+			relation("node", nodes, true, true),
 			&core.TextField{Name: "health_status"},
 			&core.NumberField{Name: "uptime_seconds", OnlyInt: true},
 			&core.TextField{Name: "last_error"},
@@ -61,13 +61,13 @@ func EnsureCollections(app core.App) error {
 
 	configRevisions, err := ensure(app, "config_revisions", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("node", nodes, true),
+			relation("node", nodes, true, false),
 			&core.SelectField{Name: "kind", Values: []string{"actual", "desired"}},
 			&core.SelectField{Name: "source", Values: []string{"pull", "template_apply", "manual_edit", "proxy_write"}},
 			&core.TextField{Name: "content_hash"},
 			&core.JSONField{Name: "content"},
 			&core.TextField{Name: "diff_summary"},
-			relation("actor", superusers, false),
+			relation("actor", superusers, false, false),
 		)
 	})
 	if err != nil {
@@ -89,10 +89,10 @@ func EnsureCollections(app core.App) error {
 
 	applyJobs, err := ensure(app, "apply_jobs", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("template", configTemplates, true),
+			relation("template", configTemplates, true, false),
 			&core.NumberField{Name: "template_version", OnlyInt: true},
 			&core.TextField{Name: "status"},
-			relation("created_by", superusers, false),
+			relation("created_by", superusers, false, false),
 		)
 	})
 	if err != nil {
@@ -101,11 +101,11 @@ func EnsureCollections(app core.App) error {
 
 	if _, err := ensure(app, "apply_job_targets", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("job", applyJobs, true),
-			relation("node", nodes, true),
+			relation("job", applyJobs, true, true),
+			relation("node", nodes, true, false),
 			&core.TextField{Name: "status"},
 			&core.TextField{Name: "error"},
-			relation("result_revision", configRevisions, false),
+			relation("result_revision", configRevisions, false, false),
 		)
 	}); err != nil {
 		return err
@@ -113,9 +113,9 @@ func EnsureCollections(app core.App) error {
 
 	_, err = ensure(app, "audit_logs", func(collection *core.Collection) {
 		collection.Fields.Add(
-			relation("actor", superusers, false),
+			relation("actor", superusers, false, false),
 			&core.TextField{Name: "action", Required: true},
-			relation("node", nodes, false),
+			relation("node", nodes, false, false),
 			&core.JSONField{Name: "request_summary"},
 			&core.TextField{Name: "ip"},
 		)
@@ -136,12 +136,12 @@ func ensure(app core.App, name string, configure func(*core.Collection)) (*core.
 	return collection, nil
 }
 
-func relation(name string, collection *core.Collection, required bool) *core.RelationField {
+func relation(name string, collection *core.Collection, required, cascade bool) *core.RelationField {
 	return &core.RelationField{
 		Name:          name,
 		CollectionId:  collection.Id,
 		MaxSelect:     1,
 		Required:      required,
-		CascadeDelete: true,
+		CascadeDelete: cascade,
 	}
 }
