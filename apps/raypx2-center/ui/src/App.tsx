@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createNode, listNodes, login, logout, pb, type CreateNodeInput } from "./api";
 import { Login } from "./pages/Login";
+import { NodeDetail } from "./pages/NodeDetail";
 import { Nodes, type CenterNode } from "./pages/Nodes";
 import { Overview } from "./pages/Overview";
 
@@ -10,6 +11,7 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState(pb.authStore.isValid);
   const [page, setPage] = useState<Page>("overview");
   const [nodes, setNodes] = useState<CenterNode[]>([]);
+  const [selectedNode, setSelectedNode] = useState<CenterNode>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -54,7 +56,7 @@ export default function App() {
             <button className={page === "overview" ? "active" : ""} onClick={() => setPage("overview")}>
               <span>◫</span> Overview
             </button>
-            <button className={page === "nodes" ? "active" : ""} onClick={() => setPage("nodes")}>
+            <button className={page === "nodes" ? "active" : ""} onClick={() => { setPage("nodes"); setSelectedNode(undefined); }}>
               <span>⌘</span> Nodes
             </button>
           </nav>
@@ -63,9 +65,22 @@ export default function App() {
       </aside>
       <main className="content">
         {error && <div className="alert">{error}</div>}
-        {page === "overview"
-          ? <Overview nodes={nodes} />
-          : <Nodes nodes={nodes} loading={loading} onRefresh={refresh} onCreate={handleCreate} />}
+        {page === "overview" ? (
+          <Overview nodes={nodes} />
+        ) : selectedNode ? (
+          <NodeDetail
+            node={nodes.find((node) => node.id === selectedNode.id) ?? selectedNode}
+            onBack={() => setSelectedNode(undefined)}
+          />
+        ) : (
+          <Nodes
+            nodes={nodes}
+            loading={loading}
+            onRefresh={refresh}
+            onCreate={handleCreate}
+            onSelect={setSelectedNode}
+          />
+        )}
       </main>
     </div>
   );

@@ -16,9 +16,10 @@ interface NodesProps {
   loading: boolean;
   onRefresh: () => void;
   onCreate?: (input: CreateNodeInput) => Promise<CreateNodeResult>;
+  onSelect?: (node: CenterNode) => void;
 }
 
-export function Nodes({ nodes, loading, onRefresh, onCreate }: NodesProps) {
+export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -90,7 +91,11 @@ export function Nodes({ nodes, loading, onRefresh, onCreate }: NodesProps) {
             )}
             {nodes.map((node) => (
               <tr key={node.id}>
-                <td className="strong">{node.name || "Unnamed node"}</td>
+                <td className="strong">
+                  {onSelect
+                    ? <button className="node-link" onClick={() => onSelect(node)}>{node.name || "Unnamed node"}</button>
+                    : node.name || "Unnamed node"}
+                </td>
                 <td><code>{node.node_key}</code></td>
                 <td><span className="tag">{node.role}</span></td>
                 <td>

@@ -12,6 +12,14 @@ export interface CreateNodeResult {
   enroll_secret: string;
 }
 
+export interface AuditLog {
+  id: string;
+  action: string;
+  ip?: string;
+  created: string;
+  request_summary?: Record<string, unknown>;
+}
+
 export const pb = new PocketBase(window.location.origin);
 
 export async function login(identity: string, password: string) {
@@ -35,6 +43,32 @@ export function createNode(input: CreateNodeInput): Promise<CreateNodeResult> {
   });
 }
 
+export function proxyNode<T = unknown>(
+  nodeKey: string,
+  method: string,
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  return centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}/proxy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      method,
+      path,
+      headers: body === undefined ? {} : { "Content-Type": "application/json" },
+      ...(body === undefined ? {} : { body }),
+    }),
+  });
+}
+
+export async function listAuditLogs(nodeId: string): Promise<AuditLog[]> {
+  const result = await pb.collection("audit_logs").getList<AuditLog>(1, 100, {
+    filter: pb.filter("node = {:node}", { node: nodeId }),
+    sort: "-created",
+  });
+  return result.items;
+}
+
 async function centerRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -46,7 +80,9 @@ async function centerRequest<T>(path: string, init: RequestInit = {}): Promise<T
   if (!response.ok) {
     if (response.status === 401) pb.authStore.clear();
     const body = await response.json().catch(() => null);
-    throw new Error(body?.message || body?.error || `Request failed (${response.status}).`);
+    const detail = body?.message || body?.code || body?.error || response.statusText || "Request failed";
+    throw new Error(`${response.status}: ${detail}`);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
