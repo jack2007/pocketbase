@@ -86,6 +86,33 @@ func (h *Hub) HasConnection(nodeKey string) bool {
 	return ok
 }
 
+// Kick sends a terminal bye frame, closes the node connection, and revokes its session.
+func (h *Hub) Kick(nodeKey, reason string) bool {
+	h.mu.Lock()
+	conn := h.connections[nodeKey]
+	if conn != nil {
+		delete(h.connections, nodeKey)
+	}
+	h.mu.Unlock()
+	if conn == nil {
+		return false
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	payload, _ := json.Marshal(map[string]string{"reason": reason})
+	_ = conn.Send(ctx, protocol.Frame{
+		Type:    "bye",
+		TS:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: payload,
+	})
+	_ = conn.Close(reason)
+	if h.revokeSession != nil && conn.SessionID() != "" {
+		_ = h.revokeSession(conn.SessionID())
+	}
+	return true
+}
+
 func (h *Hub) Send(nodeKey string, frame protocol.Frame) error {
 	h.mu.RLock()
 	conn := h.connections[nodeKey]

@@ -28,6 +28,45 @@ npm run build
 
 Commit the updated `dist` files together with the source changes.
 
+## Production HTTPS and WSS
+
+Do not expose the center's plain HTTP listener directly. Bind it to loopback
+and terminate TLS at a reverse proxy:
+
+```bash
+go run ./apps/raypx2-center serve --http=127.0.0.1:8090
+```
+
+For example, a Caddy frontend can provide certificates and proxy both HTTP
+and WebSocket traffic:
+
+```caddyfile
+center.example.com {
+	reverse_proxy 127.0.0.1:8090
+}
+```
+
+Agents must use `https://center.example.com` for enroll and refresh requests
+and `wss://center.example.com/api/agent/ws` for the control channel. The proxy
+must preserve WebSocket upgrade headers and the original client address. Use
+a publicly trusted certificate, or install the private CA on every agent; do
+not disable certificate verification.
+
+Enrollment secrets are returned only when a node is created or its secret is
+rotated. Store the returned value in the agent's secret store and never put it
+in logs. The superuser-only hardening endpoints are:
+
+- `POST /api/center/nodes/{node_key}/rotate-enroll`: returns a new one-time
+  `enroll_secret`, invalidates the old secret and sessions, and disconnects the
+  current WebSocket with `bye {"reason":"rotated"}`.
+- `POST /api/center/nodes/{node_key}/revoke`: marks enrollment revoked,
+  invalidates sessions, and disconnects the current WebSocket with
+  `bye {"reason":"revoked"}`.
+
+After rotation, update the agent with the new secret before restarting it.
+After revocation, enrollment remains blocked until an operator rotates the
+secret, which reactivates enrollment.
+
 ## M1 manual smoke check
 
 Real raypx2 Agent wiring is deferred for this milestone.

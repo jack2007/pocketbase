@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
 	"github.com/pocketbase/pocketbase/core"
+	"github.com/pocketbase/pocketbase/tools/types"
 )
 
 type createNodeRequest struct {
@@ -64,4 +65,81 @@ func (api *API) HandleListNodes(e *core.RequestEvent) error {
 		return e.InternalServerError("Failed to list nodes.", err)
 	}
 	return e.JSON(http.StatusOK, map[string]any{"items": nodes})
+}
+
+// HandleRotateEnroll replaces a node's enrollment secret and disconnects active agents.
+func (api *API) HandleRotateEnroll(e *core.RequestEvent) error {
+	nodeKey := e.Request.PathValue("node_key")
+	secret, hash, err := centercrypto.GenerateEnrollSecret()
+	if err != nil {
+		return e.InternalServerError("Failed to generate enrollment secret.", err)
+	}
+
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		node, err := txApp.FindFirstRecordByData("nodes", "node_key", nodeKey)
+		if err != nil {
+			return err
+		}
+		node.Set("enroll_secret_hash", hash)
+		node.Set("enroll_status", "active")
+		node.Set("online", false)
+		if err := txApp.Save(node); err != nil {
+			return err
+		}
+		return revokeNodeSessions(txApp, node.Id)
+	})
+	if err != nil {
+		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
+	}
+
+	api.hub.Kick(nodeKey, "rotated")
+	return e.JSON(http.StatusOK, map[string]string{"enroll_secret": secret})
+}
+
+// HandleRevokeNode revokes enrollment and disconnects active agents.
+func (api *API) HandleRevokeNode(e *core.RequestEvent) error {
+	nodeKey := e.Request.PathValue("node_key")
+	err := e.App.RunInTransaction(func(txApp core.App) error {
+		node, err := txApp.FindFirstRecordByData("nodes", "node_key", nodeKey)
+		if err != nil {
+			return err
+		}
+		node.Set("enroll_status", "revoked")
+		node.Set("online", false)
+		if err := txApp.Save(node); err != nil {
+			return err
+		}
+		return revokeNodeSessions(txApp, node.Id)
+	})
+	if err != nil {
+		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
+	}
+
+	api.hub.Kick(nodeKey, "revoked")
+	return e.JSON(http.StatusOK, map[string]string{"enroll_status": "revoked"})
+}
+
+func revokeNodeSessions(app core.App, nodeID string) error {
+	sessions, err := app.FindRecordsByFilter(
+		"agent_sessions",
+		"node = {:node}",
+		"",
+		1000,
+		0,
+		map[string]any{"node": nodeID},
+	)
+	if err != nil {
+		return err
+	}
+	now := types.NowDateTime()
+	for _, session := range sessions {
+		if !session.GetDateTime("revoked_at").IsZero() {
+			continue
+		}
+		session.Set("revoked_at", now)
+		if err := app.Save(session); err != nil {
+			return err
+		}
+	}
+	return nil
 }
