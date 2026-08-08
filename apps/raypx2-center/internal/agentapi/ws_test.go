@@ -1,14 +1,23 @@
 package agentapi
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+	"github.com/coder/websocket/wsjson"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agenthub"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/collections"
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/protocol"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+	"github.com/pocketbase/pocketbase/tools/router"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
 
@@ -102,6 +111,106 @@ func TestLookupSessionReturnsLiveSessionAndNode(t *testing.T) {
 	if gotSession.Id != session.Id || gotNode.Id != node.Id {
 		t.Fatalf("lookup returned session %q node %q", gotSession.Id, gotNode.Id)
 	}
+}
+
+func TestHandleWSWelcomeAndPingPong(t *testing.T) {
+	app, node := newWSTestApp(t)
+	testHub := agenthub.New()
+	SetHub(testHub)
+	t.Cleanup(func() { SetHub(agenthub.New()) })
+
+	token := createWSTestSession(t, app, node)
+	ts := newWSIntegrationServer(t, app)
+	defer ts.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/agent/ws"
+	conn, resp, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{
+			"Authorization": []string{"Bearer " + token},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "test done")
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusSwitchingProtocols)
+	}
+
+	var welcome protocol.Frame
+	if err := wsjson.Read(ctx, conn, &welcome); err != nil {
+		t.Fatal(err)
+	}
+	if welcome.Type != "welcome" {
+		t.Fatalf("frame type = %q, want welcome", welcome.Type)
+	}
+
+	updated, err := app.FindRecordById("nodes", node.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !updated.GetBool("online") {
+		t.Fatal("node should be marked online after welcome")
+	}
+
+	pingID := "integration-ping"
+	if err := wsjson.Write(ctx, conn, protocol.Frame{
+		Type:    "ping",
+		ID:      pingID,
+		TS:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var pong protocol.Frame
+	if err := wsjson.Read(ctx, conn, &pong); err != nil {
+		t.Fatal(err)
+	}
+	if pong.Type != "pong" || pong.ID != pingID {
+		t.Fatalf("pong = %#v, want type pong id %q", pong, pingID)
+	}
+}
+
+func createWSTestSession(t *testing.T, app core.App, node *core.Record) string {
+	t.Helper()
+	token := "ws-test-token"
+	hash, err := centercrypto.HashToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collection, err := app.FindCollectionByNameOrId("agent_sessions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := core.NewRecord(collection)
+	session.Set("node", node.Id)
+	session.Set("token_hash", hash)
+	session.Set("expires_at", types.NowDateTime().Add(time.Minute))
+	if err := app.Save(session); err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func newWSIntegrationServer(t *testing.T, app core.App) *httptest.Server {
+	t.Helper()
+	pbRouter := router.NewRouter(func(w http.ResponseWriter, r *http.Request) (*core.RequestEvent, router.EventCleanupFunc) {
+		event := new(core.RequestEvent)
+		event.Response = w
+		event.Request = r
+		event.App = app
+		return event, nil
+	})
+	pbRouter.GET("/api/agent/ws", HandleWS)
+	mux, err := pbRouter.BuildMux()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return httptest.NewServer(mux)
 }
 
 func newWSTestApp(t *testing.T) (*tests.TestApp, *core.Record) {

@@ -44,6 +44,41 @@ func (c *fakeConn) snapshot() ([]protocol.Frame, bool) {
 	return append([]protocol.Frame(nil), c.sent...), c.closed
 }
 
+func TestHubOldConnectionCleanupDoesNotUnregisterReplacement(t *testing.T) {
+	h := agenthub.New()
+	old := &fakeConn{id: "old", sessionID: "session-old"}
+	replacement := &fakeConn{id: "new", sessionID: "session-new"}
+	nodeKey := "n1"
+
+	h.Register(nodeKey, old)
+	if replaced := h.Register(nodeKey, replacement); !replaced {
+		t.Fatal("second registration did not report replacement")
+	}
+	if h.IsCurrent(nodeKey, old.ID()) {
+		t.Fatal("old connection must not be current after replacement")
+	}
+
+	markedOffline := false
+	if h.IsCurrent(nodeKey, old.ID()) {
+		markedOffline = true
+	}
+	h.Unregister(nodeKey, old.ID())
+
+	if markedOffline {
+		t.Fatal("old connection cleanup must not mark node offline when replaced")
+	}
+	if !h.IsCurrent(nodeKey, replacement.ID()) {
+		t.Fatal("replacement connection must remain current")
+	}
+	if err := h.Send(nodeKey, protocol.Frame{Type: "test"}); err != nil {
+		t.Fatalf("Send to replacement failed: %v", err)
+	}
+	sent, _ := replacement.snapshot()
+	if len(sent) != 1 || sent[0].Type != "test" {
+		t.Fatalf("replacement frames = %#v, want one test frame", sent)
+	}
+}
+
 func TestHubReplaceConnectionSendsByeClosesAndRevokesOldSession(t *testing.T) {
 	var revoked string
 	h := agenthub.New(agenthub.WithSessionRevoker(func(sessionID string) error {
