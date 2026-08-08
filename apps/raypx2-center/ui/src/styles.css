@@ -180,6 +180,13 @@ tbody tr:hover { background: #f6f8f4; }
 .acl-actions { margin-top: .4rem; }
 details { margin-top: 1rem; }
 summary { margin-bottom: .7rem; color: var(--muted); cursor: pointer; font-size: .8rem; font-weight: 600; }
+.config-layout { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, .8fr); gap: 1rem; align-items: start; }
+.template-editor, .apply-composer { display: grid; justify-content: stretch; align-items: stretch; gap: .9rem; }
+.template-editor label, .apply-composer label { margin: 0; }
+.template-editor .code-input { min-height: 260px; font-family: "DM Mono", monospace; }
+.target-picker { display: grid; gap: .5rem; max-height: 260px; overflow: auto; }
+.target-option { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .7rem; padding: .7rem; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.target-option input { width: auto; margin: 0; }
 
 .dialog-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: #07100bbb; backdrop-filter: blur(3px); }
 .dialog { width: min(100%, 470px); padding: 2rem; border-radius: 14px; background: var(--paper); box-shadow: 0 24px 70px #0008; }
@@ -200,4 +207,5 @@ summary { margin-bottom: .7rem; color: var(--muted); cursor: pointer; font-size:
   .stats { grid-template-columns: 1fr; }
   .panel, .page-heading { align-items: stretch; flex-direction: column; }
   .acl-grid { grid-template-columns: 1fr; }
+  .config-layout { grid-template-columns: 1fr; }
 }

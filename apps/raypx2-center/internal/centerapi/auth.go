@@ -9,7 +9,8 @@ import (
 
 // API exposes the superuser-only center management handlers.
 type API struct {
-	hub *agenthub.Hub
+	hub        *agenthub.Hub
+	startApply func(string) error
 }
 
 func New(hub *agenthub.Hub) *API {

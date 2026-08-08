@@ -9,6 +9,7 @@ import (
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agentapi"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agenthub"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/apply"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/centerapi"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/collections"
 	"github.com/pocketbase/pocketbase/core"
@@ -25,6 +26,7 @@ func main() {
 		return agentapi.RevokeSession(app, sessionID)
 	}))
 	agentapi.SetHub(hub)
+	apply.SetProxyRequester(hub)
 	centerAPI := centerapi.New(hub)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
@@ -38,6 +40,13 @@ func main() {
 		center.POST("/nodes", centerAPI.HandleCreateNode)
 		center.GET("/nodes", centerAPI.HandleListNodes)
 		center.POST("/nodes/{node_key}/proxy", centerAPI.HandleProxy)
+		center.GET("/templates", centerAPI.HandleListTemplates)
+		center.POST("/templates", centerAPI.HandleCreateTemplate)
+		center.PUT("/templates/{template_id}", centerAPI.HandleUpdateTemplate)
+		center.DELETE("/templates/{template_id}", centerAPI.HandleDeleteTemplate)
+		center.GET("/apply-jobs", centerAPI.HandleListApplyJobs)
+		center.POST("/apply-jobs", centerAPI.HandleCreateApplyJob)
+		center.GET("/apply-jobs/{job_id}", centerAPI.HandleGetApplyJob)
 		bindUIRoutes(e)
 		return e.Next()
 	})

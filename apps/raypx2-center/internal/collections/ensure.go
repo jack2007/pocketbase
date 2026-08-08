@@ -125,15 +125,34 @@ func EnsureCollections(app core.App) error {
 
 func ensure(app core.App, name string, configure func(*core.Collection)) (*core.Collection, error) {
 	if collection, err := app.FindCollectionByNameOrId(name); err == nil {
+		if addAutodates(collection) {
+			if err := app.Save(collection); err != nil {
+				return nil, err
+			}
+		}
 		return collection, nil
 	}
 
 	collection := core.NewBaseCollection(name)
 	configure(collection)
+	addAutodates(collection)
 	if err := app.Save(collection); err != nil {
 		return nil, err
 	}
 	return collection, nil
+}
+
+func addAutodates(collection *core.Collection) bool {
+	changed := false
+	if collection.Fields.GetByName("created") == nil {
+		collection.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+		changed = true
+	}
+	if collection.Fields.GetByName("updated") == nil {
+		collection.Fields.Add(&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true})
+		changed = true
+	}
+	return changed
 }
 
 func relation(name string, collection *core.Collection, required, cascade bool) *core.RelationField {

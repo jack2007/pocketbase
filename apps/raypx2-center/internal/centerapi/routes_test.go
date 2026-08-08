@@ -54,6 +54,36 @@ func TestCenterRoutesRequireSuperuserAuth(t *testing.T) {
 			expected:       []string{`"items"`},
 		},
 		{
+			name:           "unauthenticated GET /api/center/templates",
+			method:         http.MethodGet,
+			url:            "/api/center/templates",
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
+			name:           "superuser GET /api/center/templates",
+			method:         http.MethodGet,
+			url:            "/api/center/templates",
+			authenticated:  true,
+			expectedStatus: http.StatusOK,
+			expected:       []string{`"items"`},
+		},
+		{
+			name:           "unauthenticated GET /api/center/apply-jobs",
+			method:         http.MethodGet,
+			url:            "/api/center/apply-jobs",
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
+			name:           "superuser GET /api/center/apply-jobs",
+			method:         http.MethodGet,
+			url:            "/api/center/apply-jobs",
+			authenticated:  true,
+			expectedStatus: http.StatusOK,
+			expected:       []string{`"items"`},
+		},
+		{
 			name:   "superuser POST /api/center/nodes",
 			method: http.MethodPost,
 			url:    "/api/center/nodes",
@@ -70,13 +100,13 @@ func TestCenterRoutesRequireSuperuserAuth(t *testing.T) {
 	} {
 		base := base
 		apiScenario := tests.ApiScenario{
-			Name:           base.name,
-			Method:         base.method,
-			URL:            base.url,
-			ExpectedStatus: base.expectedStatus,
-			ExpectedContent: base.expected,
+			Name:               base.name,
+			Method:             base.method,
+			URL:                base.url,
+			ExpectedStatus:     base.expectedStatus,
+			ExpectedContent:    base.expected,
 			NotExpectedContent: base.notExpected,
-			ExpectedEvents: map[string]int{"*": 0},
+			ExpectedEvents:     map[string]int{"*": 0},
 		}
 		if base.body != "" {
 			apiScenario.Body = strings.NewReader(base.body)
@@ -107,6 +137,8 @@ func bindCenterAPIRoutes(t testing.TB, _ *tests.TestApp, e *core.ServeEvent) {
 	center := e.Router.Group("/api/center").Bind(RequireSuperuserAuth())
 	center.POST("/nodes", api.HandleCreateNode)
 	center.GET("/nodes", api.HandleListNodes)
+	center.GET("/templates", api.HandleListTemplates)
+	center.GET("/apply-jobs", api.HandleListApplyJobs)
 }
 
 func superuserAuthToken(app core.App) (string, error) {

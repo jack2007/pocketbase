@@ -1,8 +1,14 @@
 import { useEffect, useState } from "react";
-import { listAuditLogs, proxyNode, type AuditLog } from "../api";
+import {
+  listAuditLogs,
+  listConfigRevisions,
+  proxyNode,
+  type AuditLog,
+  type ConfigRevision,
+} from "../api";
 import type { CenterNode } from "./Nodes";
 
-type Tab = "overview" | "ops" | "audit";
+type Tab = "overview" | "ops" | "config" | "audit";
 type JsonObject = Record<string, unknown>;
 
 interface NodeDetailProps {
@@ -29,7 +35,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
       </div>
 
       <div className="tabs" role="tablist" aria-label="Node detail">
-        {(["overview", "ops", "audit"] as Tab[]).map((item) => (
+        {(["overview", "ops", "config", "audit"] as Tab[]).map((item) => (
           <button
             key={item}
             role="tab"
@@ -44,8 +50,69 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
 
       {tab === "overview" && <NodeOverview node={node} />}
       {tab === "ops" && <NodeOps node={node} />}
+      {tab === "config" && <NodeConfig node={node} />}
       {tab === "audit" && <NodeAudit node={node} />}
     </section>
+  );
+}
+
+function NodeConfig({ node }: { node: CenterNode }) {
+  const [live, setLive] = useState<unknown>();
+  const [revisions, setRevisions] = useState<ConfigRevision[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const history = await listConfigRevisions(node.id);
+      setRevisions(history);
+      if (node.online && (node.role === "client" || node.role === "server")) {
+        setLive(await proxyNode(
+          node.node_key,
+          "GET",
+          node.role === "server" ? "/api/v1/server/config" : "/api/v1/config",
+        ));
+      } else {
+        setLive(undefined);
+      }
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, [node.id, node.online]);
+
+  return (
+    <div className="ops-stack">
+      {error && <div className="alert" role="alert">{error}</div>}
+      <div className="panel ops-panel">
+        <PanelHeading title="Live configuration" onRefresh={() => void load()} loading={loading} />
+        {!node.online
+          ? <p className="muted">Node is offline; showing revision history only.</p>
+          : <JsonView value={live} empty={loading ? "Loading…" : "No configuration returned."} />}
+      </div>
+      <div className="table-shell">
+        <table>
+          <thead><tr><th>Time</th><th>Kind</th><th>Source</th><th>Summary</th><th>Content</th></tr></thead>
+          <tbody>
+            {revisions.length === 0 && <EmptyRow columns={5} loading={loading} />}
+            {revisions.map((revision) => (
+              <tr key={revision.id}>
+                <td>{formatDate(revision.created)}</td>
+                <td><span className="tag">{revision.kind}</span></td>
+                <td>{revision.source}</td>
+                <td>{revision.diff_summary || "—"}</td>
+                <td><details><summary>View JSON</summary><JsonView value={revision.content} /></details></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

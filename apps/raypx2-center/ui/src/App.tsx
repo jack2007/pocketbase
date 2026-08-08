@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { createNode, listNodes, login, logout, pb, type CreateNodeInput } from "./api";
 import { Login } from "./pages/Login";
+import { ApplyJobs } from "./pages/ApplyJobs";
 import { NodeDetail } from "./pages/NodeDetail";
 import { Nodes, type CenterNode } from "./pages/Nodes";
 import { Overview } from "./pages/Overview";
+import { Templates } from "./pages/Templates";
 
-type Page = "overview" | "nodes";
+type Page = "overview" | "nodes" | "templates" | "apply-jobs";
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(pb.authStore.isValid);
@@ -59,6 +61,12 @@ export default function App() {
             <button className={page === "nodes" ? "active" : ""} onClick={() => { setPage("nodes"); setSelectedNode(undefined); }}>
               <span>⌘</span> Nodes
             </button>
+            <button className={page === "templates" ? "active" : ""} onClick={() => { setPage("templates"); setSelectedNode(undefined); }}>
+              <span>◇</span> Templates
+            </button>
+            <button className={page === "apply-jobs" ? "active" : ""} onClick={() => { setPage("apply-jobs"); setSelectedNode(undefined); }}>
+              <span>↯</span> Apply Jobs
+            </button>
           </nav>
         </div>
         <button className="sign-out" onClick={logout}>Sign out</button>
@@ -67,6 +75,10 @@ export default function App() {
         {error && <div className="alert">{error}</div>}
         {page === "overview" ? (
           <Overview nodes={nodes} />
+        ) : page === "templates" ? (
+          <Templates />
+        ) : page === "apply-jobs" ? (
+          <ApplyJobs nodes={nodes} />
         ) : selectedNode ? (
           <NodeDetail
             node={nodes.find((node) => node.id === selectedNode.id) ?? selectedNode}

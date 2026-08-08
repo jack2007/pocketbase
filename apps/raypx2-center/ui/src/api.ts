@@ -20,6 +20,42 @@ export interface AuditLog {
   request_summary?: Record<string, unknown>;
 }
 
+export interface ConfigTemplate {
+  id: string;
+  name: string;
+  target_role: "client" | "server";
+  body: Record<string, unknown>;
+  version: number;
+  notes?: string;
+}
+
+export interface ApplyJobTarget {
+  id: string;
+  node: string;
+  status: string;
+  error?: string;
+  result_revision?: string;
+}
+
+export interface ApplyJob {
+  id: string;
+  template: string;
+  template_version: number;
+  status: string;
+  targets: ApplyJobTarget[];
+}
+
+export interface ConfigRevision {
+  id: string;
+  node: string;
+  kind: "actual" | "desired";
+  source: string;
+  content_hash: string;
+  content: Record<string, unknown>;
+  diff_summary?: string;
+  created?: string;
+}
+
 export const pb = new PocketBase(window.location.origin);
 
 export async function login(identity: string, password: string) {
@@ -63,6 +99,55 @@ export function proxyNode<T = unknown>(
 
 export async function listAuditLogs(nodeId: string): Promise<AuditLog[]> {
   const result = await pb.collection("audit_logs").getList<AuditLog>(1, 100, {
+    filter: pb.filter("node = {:node}", { node: nodeId }),
+    sort: "-created",
+  });
+  return result.items;
+}
+
+export async function listTemplates(): Promise<ConfigTemplate[]> {
+  const response = await centerRequest<{ items: ConfigTemplate[] }>("/api/center/templates");
+  return response.items;
+}
+
+export function createTemplate(input: Omit<ConfigTemplate, "id" | "version">): Promise<ConfigTemplate> {
+  return centerRequest("/api/center/templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export function updateTemplate(
+  id: string,
+  input: Omit<ConfigTemplate, "id" | "version">,
+): Promise<ConfigTemplate> {
+  return centerRequest(`/api/center/templates/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  await centerRequest(`/api/center/templates/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function listApplyJobs(): Promise<ApplyJob[]> {
+  const response = await centerRequest<{ items: ApplyJob[] }>("/api/center/apply-jobs");
+  return response.items;
+}
+
+export function createApplyJob(template: string, nodes: string[]): Promise<ApplyJob> {
+  return centerRequest("/api/center/apply-jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template, nodes }),
+  });
+}
+
+export async function listConfigRevisions(nodeId: string): Promise<ConfigRevision[]> {
+  const result = await pb.collection("config_revisions").getList<ConfigRevision>(1, 100, {
     filter: pb.filter("node = {:node}", { node: nodeId }),
     sort: "-created",
   });
