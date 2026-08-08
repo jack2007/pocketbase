@@ -109,32 +109,11 @@ func HandleEnroll(e *core.RequestEvent) error {
 
 // HandleRefresh validates and rotates a live bearer session token.
 func HandleRefresh(e *core.RequestEvent) error {
-	token := bearerToken(e.Request.Header.Get("Authorization"))
-	if token == "" {
-		return invalidCredentials(e)
-	}
-
 	var response sessionResponse
 	err := e.App.RunInTransaction(func(txApp core.App) error {
-		sessions, err := txApp.FindAllRecords("agent_sessions")
+		matched, _, err := LookupSession(txApp, e.Request.Header.Get("Authorization"))
 		if err != nil {
 			return err
-		}
-
-		var matched *core.Record
-		now := types.NowDateTime()
-		for _, session := range sessions {
-			if !session.GetDateTime("revoked_at").IsZero() ||
-				!session.GetDateTime("expires_at").After(now) {
-				continue
-			}
-			if centercrypto.VerifySecret(session.GetString("token_hash"), token) {
-				matched = session
-				break
-			}
-		}
-		if matched == nil {
-			return errInvalidSession
 		}
 
 		newToken, err := generateToken()
