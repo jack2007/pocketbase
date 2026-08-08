@@ -7,8 +7,14 @@ import (
 )
 
 const (
-	ActionAgentEnroll  = "agent.enroll"
-	ActionProxyRequest = "proxy.request"
+	ActionAgentEnroll    = "agent.enroll"
+	ActionProxyRequest   = "proxy.request"
+	ActionNodeCreate     = "node.create"
+	ActionNodeRotate     = "node.rotate_enroll"
+	ActionNodeRevoke     = "node.revoke"
+	ActionTemplateCreate = "template.create"
+	ActionTemplateUpdate = "template.update"
+	ActionApplyJobCreate = "apply_job.create"
 )
 
 // RecordAgentEnroll stores a secret-free enrollment outcome.
@@ -59,5 +65,31 @@ func RecordProxyRequest(
 		"status":     status,
 		"latency_ms": latency.Milliseconds(),
 	})
+	return app.Save(record)
+}
+
+// RecordManagement stores a secret-free management action.
+func RecordManagement(
+	app core.App,
+	actorID string,
+	action string,
+	nodeID string,
+	ip string,
+	summary map[string]any,
+) error {
+	collection, err := app.FindCollectionByNameOrId("audit_logs")
+	if err != nil {
+		return err
+	}
+	record := core.NewRecord(collection)
+	record.Set("action", action)
+	if actorID != "" {
+		record.Set("actor", actorID)
+	}
+	if nodeID != "" {
+		record.Set("node", nodeID)
+	}
+	record.Set("ip", ip)
+	record.Set("request_summary", summary)
 	return app.Save(record)
 }

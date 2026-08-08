@@ -17,6 +17,13 @@ func New(hub *agenthub.Hub) *API {
 	return &API{hub: hub}
 }
 
+func actorID(e *core.RequestEvent) string {
+	if e.Auth == nil {
+		return ""
+	}
+	return e.Auth.Id
+}
+
 // RequireSuperuserAuth uses PocketBase's standard superuser auth middleware.
 func RequireSuperuserAuth() *hook.Handler[*core.RequestEvent] {
 	return apis.RequireSuperuserAuth()

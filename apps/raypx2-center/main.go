@@ -30,7 +30,7 @@ func main() {
 	centerAPI := centerapi.New(hub)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
-		if err := collections.EnsureCollections(e.App); err != nil {
+		if err := initializeCenter(e.App); err != nil {
 			return err
 		}
 		e.Router.POST("/api/agent/enroll", agentapi.HandleEnroll)
@@ -56,6 +56,26 @@ func main() {
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func initializeCenter(app core.App) error {
+	if err := collections.EnsureCollections(app); err != nil {
+		return err
+	}
+	nodes, err := app.FindAllRecords("nodes")
+	if err != nil {
+		return err
+	}
+	for _, node := range nodes {
+		if !node.GetBool("online") {
+			continue
+		}
+		node.Set("online", false)
+		if err := app.Save(node); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func bindUIRoutes(e *core.ServeEvent) {

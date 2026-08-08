@@ -85,6 +85,70 @@ func TestApplyConfigSnapshotCreatesActualRevision(t *testing.T) {
 	}
 }
 
+func TestApplyConfigSnapshotRejectsTLSKeyWithoutPersisting(t *testing.T) {
+	app, node := newWSTestApp(t)
+	payload := json.RawMessage(`{
+		"content_hash":"sha256:unsafe",
+		"content":{"server":{"tls":{"key":"PRIVATE"}}}
+	}`)
+
+	if err := applyConfigSnapshot(app, node, payload); err == nil {
+		t.Fatal("config snapshot containing tls.key was accepted")
+	}
+	revisions, err := app.FindRecordsByFilter(
+		"config_revisions",
+		"node = {:node}",
+		"",
+		10,
+		0,
+		map[string]any{"node": node.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 0 {
+		t.Fatalf("revision rows = %d, want 0", len(revisions))
+	}
+}
+
+func TestApplyStatusSummaryRejectsNestedSecretAndTruncatesLastError(t *testing.T) {
+	app, node := newWSTestApp(t)
+	unsafe := json.RawMessage(`{"health_status":"bad","details":{"token":"SECRET"}}`)
+	if err := applyStatusSummary(app, node, unsafe); err == nil {
+		t.Fatal("status summary containing nested token was accepted")
+	}
+	statuses, err := app.FindRecordsByFilter(
+		"node_status",
+		"node = {:node}",
+		"",
+		10,
+		0,
+		map[string]any{"node": node.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 0 {
+		t.Fatalf("status rows = %d, want 0", len(statuses))
+	}
+
+	longError := strings.Repeat("x", maxLastErrorBytes+100)
+	payload, err := json.Marshal(map[string]any{"last_error": longError})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyStatusSummary(app, node, payload); err != nil {
+		t.Fatal(err)
+	}
+	status, err := app.FindFirstRecordByData("node_status", "node", node.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(status.GetString("last_error")); got != maxLastErrorBytes {
+		t.Fatalf("last_error length = %d, want %d", got, maxLastErrorBytes)
+	}
+}
+
 func TestLookupSessionReturnsLiveSessionAndNode(t *testing.T) {
 	app, node := newWSTestApp(t)
 	token := "session-token"
@@ -110,6 +174,34 @@ func TestLookupSessionReturnsLiveSessionAndNode(t *testing.T) {
 	}
 	if gotSession.Id != session.Id || gotNode.Id != node.Id {
 		t.Fatalf("lookup returned session %q node %q", gotSession.Id, gotNode.Id)
+	}
+}
+
+func TestRevokedNodeCannotOpenWebSocket(t *testing.T) {
+	app, node := newWSTestApp(t)
+	token := createWSTestSession(t, app, node)
+	node.Set("enroll_status", "revoked")
+	if err := app.Save(node); err != nil {
+		t.Fatal(err)
+	}
+	ts := newWSIntegrationServer(t, app)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/agent/ws"
+	conn, response, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
+	})
+	if conn != nil {
+		conn.CloseNow()
+		t.Fatal("revoked node opened a websocket")
+	}
+	if err == nil {
+		t.Fatal("websocket dial unexpectedly succeeded")
+	}
+	if response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("response = %#v, want HTTP %d", response, http.StatusUnauthorized)
 	}
 }
 
@@ -173,6 +265,60 @@ func TestHandleWSWelcomeAndPingPong(t *testing.T) {
 	}
 	if pong.Type != "pong" || pong.ID != pingID {
 		t.Fatalf("pong = %#v, want type pong id %q", pong, pingID)
+	}
+}
+
+func TestHandleWSRejectsSensitiveConfigWithErrorFrame(t *testing.T) {
+	app, node := newWSTestApp(t)
+	SetHub(agenthub.New())
+	t.Cleanup(func() { SetHub(agenthub.New()) })
+	token := createWSTestSession(t, app, node)
+	ts := newWSIntegrationServer(t, app)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/agent/ws"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Authorization": []string{"Bearer " + token}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	var welcome protocol.Frame
+	if err := wsjson.Read(ctx, conn, &welcome); err != nil {
+		t.Fatal(err)
+	}
+	request := protocol.Frame{
+		Type:    "config_snapshot",
+		ID:      "unsafe-config",
+		TS:      time.Now().UTC().Format(time.RFC3339Nano),
+		Payload: json.RawMessage(`{"content_hash":"bad","content":{"tls":{"key":"PRIVATE"}}}`),
+	}
+	if err := wsjson.Write(ctx, conn, request); err != nil {
+		t.Fatal(err)
+	}
+	var response protocol.Frame
+	if err := wsjson.Read(ctx, conn, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Type != "error" || response.ID != request.ID {
+		t.Fatalf("response = %#v, want correlated error frame", response)
+	}
+	revisions, err := app.FindRecordsByFilter(
+		"config_revisions",
+		"node = {:node}",
+		"",
+		10,
+		0,
+		map[string]any{"node": node.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 0 {
+		t.Fatalf("revision rows = %d, want 0", len(revisions))
 	}
 }
 

@@ -107,6 +107,23 @@ func TestHubReplaceConnectionSendsByeClosesAndRevokesOldSession(t *testing.T) {
 	}
 }
 
+func TestHubKickRejectsRegistrationStartedBeforeKick(t *testing.T) {
+	h := agenthub.New()
+	nodeKey := "n1"
+	epoch := h.Epoch(nodeKey)
+
+	if kicked := h.Kick(nodeKey, "revoked"); kicked {
+		t.Fatal("kick unexpectedly reported an existing connection")
+	}
+	conn := &fakeConn{id: "late", sessionID: "session-late"}
+	if _, err := h.RegisterAtEpoch(nodeKey, epoch, conn); !errors.Is(err, agenthub.ErrStaleRegistration) {
+		t.Fatalf("registration error = %v, want ErrStaleRegistration", err)
+	}
+	if h.HasConnection(nodeKey) {
+		t.Fatal("late registration survived kick")
+	}
+}
+
 func TestHubRequestProxyCorrelatesResponse(t *testing.T) {
 	h := agenthub.New()
 	conn := &fakeConn{id: "a", sessionID: "session-a"}

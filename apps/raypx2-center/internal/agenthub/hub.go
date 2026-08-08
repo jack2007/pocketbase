@@ -3,11 +3,14 @@ package agenthub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/protocol"
 )
+
+var ErrStaleRegistration = errors.New("stale agent registration")
 
 type Conn interface {
 	ID() string
@@ -26,6 +29,7 @@ type Hub struct {
 	mu            sync.RWMutex
 	connections   map[string]Conn
 	pending       map[string]pendingResponse
+	epochs        map[string]uint64
 	revokeSession func(string) error
 }
 
@@ -33,6 +37,7 @@ func New(options ...Option) *Hub {
 	h := &Hub{
 		connections: make(map[string]Conn),
 		pending:     make(map[string]pendingResponse),
+		epochs:      make(map[string]uint64),
 	}
 	for _, option := range options {
 		option(h)
@@ -45,8 +50,34 @@ func (h *Hub) Register(nodeKey string, conn Conn) (replaced bool) {
 	old := h.connections[nodeKey]
 	h.connections[nodeKey] = conn
 	h.mu.Unlock()
+	h.closeReplaced(old, conn)
+	return old != nil && old.ID() != conn.ID()
+}
+
+// Epoch returns the current registration generation for a node.
+func (h *Hub) Epoch(nodeKey string) uint64 {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.epochs[nodeKey]
+}
+
+// RegisterAtEpoch registers a connection only if no intervening Kick occurred.
+func (h *Hub) RegisterAtEpoch(nodeKey string, epoch uint64, conn Conn) (bool, error) {
+	h.mu.Lock()
+	if h.epochs[nodeKey] != epoch {
+		h.mu.Unlock()
+		return false, ErrStaleRegistration
+	}
+	old := h.connections[nodeKey]
+	h.connections[nodeKey] = conn
+	h.mu.Unlock()
+	h.closeReplaced(old, conn)
+	return old != nil && old.ID() != conn.ID(), nil
+}
+
+func (h *Hub) closeReplaced(old, conn Conn) {
 	if old == nil || old.ID() == conn.ID() {
-		return false
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -61,7 +92,6 @@ func (h *Hub) Register(nodeKey string, conn Conn) (replaced bool) {
 	if h.revokeSession != nil && old.SessionID() != "" && old.SessionID() != conn.SessionID() {
 		_ = h.revokeSession(old.SessionID())
 	}
-	return true
 }
 
 func (h *Hub) Unregister(nodeKey, connID string) {
@@ -89,6 +119,7 @@ func (h *Hub) HasConnection(nodeKey string) bool {
 // Kick sends a terminal bye frame, closes the node connection, and revokes its session.
 func (h *Hub) Kick(nodeKey, reason string) bool {
 	h.mu.Lock()
+	h.epochs[nodeKey]++
 	conn := h.connections[nodeKey]
 	if conn != nil {
 		delete(h.connections, nodeKey)

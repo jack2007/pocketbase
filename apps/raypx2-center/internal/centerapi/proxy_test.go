@@ -156,6 +156,28 @@ func TestCreateAndListNodesKeepsEnrollSecretOneTimeOnly(t *testing.T) {
 	if !centercrypto.VerifySecret(stored.GetString("enroll_secret_hash"), result.EnrollSecret) {
 		t.Fatal("returned enrollment secret does not match stored hash")
 	}
+	audits, err := app.FindRecordsByFilter(
+		"audit_logs",
+		"action = 'node.create' && node = {:node}",
+		"",
+		10,
+		0,
+		map[string]any{"node": stored.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) != 1 || audits[0].GetString("actor") != auth.Id {
+		t.Fatalf("node create audits = %#v", audits)
+	}
+	summary, err := json.Marshal(audits[0].Get("request_summary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(summary, []byte(result.EnrollSecret)) ||
+		bytes.Contains(summary, []byte("enroll_secret_hash")) {
+		t.Fatalf("node create audit leaked a secret: %s", summary)
+	}
 
 	listed := performCenterRequest(t, app, auth, http.MethodGet,
 		"/api/center/nodes", "", nil, api.HandleListNodes)

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	applyrunner "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/apply"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/audit"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -66,32 +67,47 @@ func (api *API) HandleCreateApplyJob(e *core.RequestEvent) error {
 		nodes = append(nodes, node)
 	}
 
-	jobCollection, err := e.App.FindCollectionByNameOrId("apply_jobs")
-	if err != nil {
-		return e.InternalServerError("Failed to load apply jobs.", err)
-	}
-	job := core.NewRecord(jobCollection)
-	job.Set("template", template.Id)
-	job.Set("template_version", template.GetInt("version"))
-	job.Set("status", "queued")
-	if e.Auth != nil {
-		job.Set("created_by", e.Auth.Id)
-	}
-	if err := e.App.Save(job); err != nil {
-		return e.InternalServerError("Failed to create apply job.", err)
-	}
-	targetCollection, err := e.App.FindCollectionByNameOrId("apply_job_targets")
-	if err != nil {
-		return e.InternalServerError("Failed to load apply targets.", err)
-	}
-	for _, node := range nodes {
-		target := core.NewRecord(targetCollection)
-		target.Set("job", job.Id)
-		target.Set("node", node.Id)
-		target.Set("status", "queued")
-		if err := e.App.Save(target); err != nil {
-			return e.InternalServerError("Failed to create apply target.", err)
+	var job *core.Record
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		jobCollection, err := txApp.FindCollectionByNameOrId("apply_jobs")
+		if err != nil {
+			return err
 		}
+		job = core.NewRecord(jobCollection)
+		job.Set("template", template.Id)
+		job.Set("template_version", template.GetInt("version"))
+		job.Set("status", "queued")
+		if e.Auth != nil {
+			job.Set("created_by", e.Auth.Id)
+		}
+		if err := txApp.Save(job); err != nil {
+			return err
+		}
+		targetCollection, err := txApp.FindCollectionByNameOrId("apply_job_targets")
+		if err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			target := core.NewRecord(targetCollection)
+			target.Set("job", job.Id)
+			target.Set("node", node.Id)
+			target.Set("status", "queued")
+			if err := txApp.Save(target); err != nil {
+				return err
+			}
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionApplyJobCreate, "", e.RemoteIP(),
+			map[string]any{
+				"job_id":           job.Id,
+				"template_id":      template.Id,
+				"template_version": template.GetInt("version"),
+				"target_count":     len(nodes),
+			},
+		)
+	})
+	if err != nil {
+		return e.InternalServerError("Failed to create apply job.", err)
 	}
 	start := api.startApply
 	if start == nil {

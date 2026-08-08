@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/audit"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/configmerge"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -29,31 +30,64 @@ func (api *API) HandleCreateTemplate(e *core.RequestEvent) error {
 	if err != nil {
 		return e.JSON(http.StatusBadRequest, errorResponse("invalid_template"))
 	}
-	collection, err := e.App.FindCollectionByNameOrId("config_templates")
+	var record *core.Record
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		collection, err := txApp.FindCollectionByNameOrId("config_templates")
+		if err != nil {
+			return err
+		}
+		record = core.NewRecord(collection)
+		setTemplate(record, request)
+		record.Set("version", 1)
+		if err := txApp.Save(record); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionTemplateCreate, "", e.RemoteIP(),
+			map[string]any{
+				"template_id": record.Id,
+				"name":        record.GetString("name"),
+				"target_role": record.GetString("target_role"),
+				"version":     record.GetInt("version"),
+			},
+		)
+	})
 	if err != nil {
-		return e.InternalServerError("Failed to load templates.", err)
-	}
-	record := core.NewRecord(collection)
-	setTemplate(record, request)
-	record.Set("version", 1)
-	if err := e.App.Save(record); err != nil {
 		return e.JSON(http.StatusBadRequest, errorResponse("invalid_template"))
 	}
 	return e.JSON(http.StatusCreated, record)
 }
 
 func (api *API) HandleUpdateTemplate(e *core.RequestEvent) error {
-	record, err := e.App.FindRecordById("config_templates", e.Request.PathValue("template_id"))
-	if err != nil {
+	if _, err := e.App.FindRecordById("config_templates", e.Request.PathValue("template_id")); err != nil {
 		return e.JSON(http.StatusNotFound, errorResponse("template_not_found"))
 	}
 	request, err := bindAndValidateTemplate(e)
 	if err != nil {
 		return e.JSON(http.StatusBadRequest, errorResponse("invalid_template"))
 	}
-	setTemplate(record, request)
-	record.Set("version", record.GetInt("version")+1)
-	if err := e.App.Save(record); err != nil {
+	var record *core.Record
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		record, err = txApp.FindRecordById("config_templates", e.Request.PathValue("template_id"))
+		if err != nil {
+			return err
+		}
+		setTemplate(record, request)
+		record.Set("version", record.GetInt("version")+1)
+		if err := txApp.Save(record); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionTemplateUpdate, "", e.RemoteIP(),
+			map[string]any{
+				"template_id": record.Id,
+				"name":        record.GetString("name"),
+				"target_role": record.GetString("target_role"),
+				"version":     record.GetInt("version"),
+			},
+		)
+	})
+	if err != nil {
 		return e.JSON(http.StatusBadRequest, errorResponse("invalid_template"))
 	}
 	return e.JSON(http.StatusOK, record)

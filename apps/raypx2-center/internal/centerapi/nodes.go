@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/audit"
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -33,22 +34,40 @@ func (api *API) HandleCreateNode(e *core.RequestEvent) error {
 	if err != nil {
 		return e.InternalServerError("Failed to generate enrollment secret.", err)
 	}
-	collection, err := e.App.FindCollectionByNameOrId("nodes")
+	var node *core.Record
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		collection, err := txApp.FindCollectionByNameOrId("nodes")
+		if err != nil {
+			return err
+		}
+		node = core.NewRecord(collection)
+		node.Set("node_key", request.NodeKey)
+		node.Set("name", request.Name)
+		node.Set("role", request.Role)
+		node.Set("labels", request.Labels)
+		node.Set("enroll_secret_hash", hash)
+		node.Set("enroll_status", "active")
+		node.Set("online", false)
+		if e.Auth != nil {
+			node.Set("created_by", e.Auth.Id)
+		}
+		if err := txApp.Save(node); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp,
+			actorID(e),
+			audit.ActionNodeCreate,
+			node.Id,
+			e.RemoteIP(),
+			map[string]any{
+				"node_key": node.GetString("node_key"),
+				"name":     node.GetString("name"),
+				"role":     node.GetString("role"),
+			},
+		)
+	})
 	if err != nil {
-		return e.InternalServerError("Failed to load nodes.", err)
-	}
-	node := core.NewRecord(collection)
-	node.Set("node_key", request.NodeKey)
-	node.Set("name", request.Name)
-	node.Set("role", request.Role)
-	node.Set("labels", request.Labels)
-	node.Set("enroll_secret_hash", hash)
-	node.Set("enroll_status", "active")
-	node.Set("online", false)
-	if e.Auth != nil {
-		node.Set("created_by", e.Auth.Id)
-	}
-	if err := e.App.Save(node); err != nil {
 		return e.JSON(http.StatusBadRequest, errorResponse("invalid_node"))
 	}
 
@@ -86,7 +105,13 @@ func (api *API) HandleRotateEnroll(e *core.RequestEvent) error {
 		if err := txApp.Save(node); err != nil {
 			return err
 		}
-		return revokeNodeSessions(txApp, node.Id)
+		if err := revokeNodeSessions(txApp, node.Id); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionNodeRotate, node.Id, e.RemoteIP(),
+			map[string]any{"node_key": nodeKey},
+		)
 	})
 	if err != nil {
 		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
@@ -109,7 +134,13 @@ func (api *API) HandleRevokeNode(e *core.RequestEvent) error {
 		if err := txApp.Save(node); err != nil {
 			return err
 		}
-		return revokeNodeSessions(txApp, node.Id)
+		if err := revokeNodeSessions(txApp, node.Id); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionNodeRevoke, node.Id, e.RemoteIP(),
+			map[string]any{"node_key": nodeKey},
+		)
 	})
 	if err != nil {
 		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
@@ -120,26 +151,27 @@ func (api *API) HandleRevokeNode(e *core.RequestEvent) error {
 }
 
 func revokeNodeSessions(app core.App, nodeID string) error {
-	sessions, err := app.FindRecordsByFilter(
-		"agent_sessions",
-		"node = {:node}",
-		"",
-		1000,
-		0,
-		map[string]any{"node": nodeID},
-	)
-	if err != nil {
-		return err
-	}
 	now := types.NowDateTime()
-	for _, session := range sessions {
-		if !session.GetDateTime("revoked_at").IsZero() {
-			continue
-		}
-		session.Set("revoked_at", now)
-		if err := app.Save(session); err != nil {
+	for {
+		sessions, err := app.FindRecordsByFilter(
+			"agent_sessions",
+			"node = {:node} && revoked_at = ''",
+			"",
+			500,
+			0,
+			map[string]any{"node": nodeID},
+		)
+		if err != nil {
 			return err
 		}
+		if len(sessions) == 0 {
+			return nil
+		}
+		for _, session := range sessions {
+			session.Set("revoked_at", now)
+			if err := app.Save(session); err != nil {
+				return err
+			}
+		}
 	}
-	return nil
 }

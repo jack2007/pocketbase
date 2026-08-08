@@ -53,6 +53,30 @@ func TestTemplateAPIRejectsSecretsAndVersionsUpdates(t *testing.T) {
 	if stored.GetInt("version") != 2 {
 		t.Fatalf("updated version = %d", stored.GetInt("version"))
 	}
+	for _, action := range []string{"template.create", "template.update"} {
+		logs, err := app.FindRecordsByFilter(
+			"audit_logs",
+			"action = {:action}",
+			"",
+			10,
+			0,
+			map[string]any{"action": action},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(logs) != 1 || logs[0].GetString("actor") != auth.Id {
+			t.Fatalf("%s audits = %#v", action, logs)
+		}
+		summary, err := json.Marshal(logs[0].Get("request_summary"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(summary, []byte("allow_targets")) ||
+			bytes.Contains(summary, []byte("deny_targets")) {
+			t.Fatalf("%s audit included template body: %s", action, summary)
+		}
+	}
 }
 
 func TestCreateApplyJobCreatesTargets(t *testing.T) {
@@ -93,6 +117,19 @@ func TestCreateApplyJobCreatesTargets(t *testing.T) {
 	targets, err := app.FindRecordsByFilter("apply_job_targets", "", "", 10, 0)
 	if err != nil || len(targets) != 2 {
 		t.Fatalf("targets = %d, err = %v", len(targets), err)
+	}
+	logs, err := app.FindRecordsByFilter(
+		"audit_logs",
+		"action = 'apply_job.create'",
+		"",
+		10,
+		0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].GetString("actor") != auth.Id {
+		t.Fatalf("apply job audits = %#v", logs)
 	}
 }
 
