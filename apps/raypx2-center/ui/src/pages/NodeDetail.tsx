@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import {
+  getNodeConfig,
   listAuditLogs,
-  listConfigRevisions,
+  putNodeConfig,
   proxyNode,
   type AuditLog,
   type ConfigRevision,
+  type NodeConfigResponse,
 } from "../api";
 import type { CenterNode } from "./Nodes";
 
@@ -18,10 +20,16 @@ interface NodeDetailProps {
 
 export function NodeDetail({ node, onBack }: NodeDetailProps) {
   const [tab, setTab] = useState<Tab>("overview");
+  const [configDirty, setConfigDirty] = useState(false);
+
+  function leaveConfig(action: () => void) {
+    if (tab === "config" && configDirty && !window.confirm("Discard unsaved configuration changes?")) return;
+    action();
+  }
 
   return (
     <section>
-      <button className="back-button" onClick={onBack}>← Back to nodes</button>
+      <button className="back-button" onClick={() => leaveConfig(onBack)}>← Back to nodes</button>
       <div className="page-heading node-heading">
         <div>
           <p className="eyebrow">Node detail</p>
@@ -41,7 +49,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
             role="tab"
             aria-selected={tab === item}
             className={tab === item ? "active" : ""}
-            onClick={() => setTab(item)}
+            onClick={() => leaveConfig(() => setTab(item))}
           >
             {title(item)}
           </button>
@@ -50,33 +58,55 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
 
       {tab === "overview" && <NodeOverview node={node} />}
       {tab === "ops" && <NodeOps node={node} />}
-      {tab === "config" && <NodeConfig node={node} />}
+      {tab === "config" && <NodeConfig node={node} onDirtyChange={setConfigDirty} />}
       {tab === "audit" && <NodeAudit node={node} />}
     </section>
   );
 }
 
-function NodeConfig({ node }: { node: CenterNode }) {
-  const [live, setLive] = useState<unknown>();
+function NodeConfig({
+  node,
+  onDirtyChange,
+}: {
+  node: CenterNode;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
+  const [mode, setMode] = useState<"form" | "json">("form");
+  const [draft, setDraft] = useState<JsonObject>({});
+  const [jsonText, setJsonText] = useState("{}");
+  const [baseline, setBaseline] = useState("");
+  const [role, setRole] = useState<string>(node.role);
+  const [online, setOnline] = useState(node.online);
+  const [liveMeta, setLiveMeta] = useState<JsonObject>({});
   const [revisions, setRevisions] = useState<ConfigRevision[]>([]);
+  const [ignored, setIgnored] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const currentSnapshot = mode === "json" ? jsonSnapshot(jsonText) : stableStringify(draft);
+  const dirty = baseline !== "" && currentSnapshot !== baseline;
+  const readOnly = !online || (role !== "client" && role !== "server");
+
+  useEffect(() => {
+    onDirtyChange(dirty);
+    return () => onDirtyChange(false);
+  }, [dirty, onDirtyChange]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const history = await listConfigRevisions(node.id);
-      setRevisions(history);
-      if (node.online && (node.role === "client" || node.role === "server")) {
-        setLive(await proxyNode(
-          node.node_key,
-          "GET",
-          node.role === "server" ? "/api/v1/server/config" : "/api/v1/config",
-        ));
-      } else {
-        setLive(undefined);
-      }
+      const response = await getNodeConfig(node.node_key);
+      const nextDraft = response.editor_draft || {};
+      setDraft(nextDraft);
+      setJsonText(JSON.stringify(nextDraft, null, 2));
+      setBaseline(stableStringify(nextDraft));
+      setRole(response.role);
+      setOnline(response.online);
+      setLiveMeta(connectionMetadata(response));
+      setRevisions(response.recent_revisions || []);
+      setIgnored([]);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {
@@ -84,16 +114,123 @@ function NodeConfig({ node }: { node: CenterNode }) {
     }
   }
 
-  useEffect(() => { void load(); }, [node.id, node.online]);
+  useEffect(() => { void load(); }, [node.node_key]);
+
+  function switchMode(nextMode: "form" | "json") {
+    if (nextMode === mode) return;
+    setError("");
+    if (nextMode === "json") {
+      setJsonText(JSON.stringify(draft, null, 2));
+      setMode("json");
+      return;
+    }
+    const parsed = parseJsonObject(jsonText);
+    if (!parsed) {
+      setError("Configuration must be a valid JSON object before switching to Form.");
+      return;
+    }
+    setDraft(parsed);
+    setMode("form");
+  }
+
+  async function save() {
+    let content = draft;
+    if (mode === "json") {
+      const parsed = parseJsonObject(jsonText);
+      if (!parsed) {
+        setError("Configuration must be a valid JSON object before saving.");
+        return;
+      }
+      content = parsed;
+      setDraft(parsed);
+    }
+    if (readOnly) return;
+    setSaving(true);
+    setError("");
+    setIgnored([]);
+    try {
+      const result = await putNodeConfig(node.node_key, content);
+      setDraft(result.applied);
+      setJsonText(JSON.stringify(result.applied, null, 2));
+      setBaseline(stableStringify(result.applied));
+      setIgnored(result.ignored_fields || []);
+    } catch (cause) {
+      if (isNodeOfflineError(cause)) {
+        setOnline(false);
+        setError("Node is offline. Your unsaved configuration draft has been preserved.");
+      } else {
+        setError(errorMessage(cause));
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="ops-stack">
       {error && <div className="alert" role="alert">{error}</div>}
+      {!online && <div className="offline-notice">Configuration is read-only while this node is offline.</div>}
+      {online && role !== "client" && role !== "server" && (
+        <div className="offline-notice">Configuration is read-only for unsupported node role “{role}”.</div>
+      )}
+      {ignored.length > 0 && (
+        <div className="offline-notice">
+          <strong>Ignored fields:</strong> {ignored.map((field) => <code key={field}>{field}</code>)}
+        </div>
+      )}
       <div className="panel ops-panel">
-        <PanelHeading title="Live configuration" onRefresh={() => void load()} loading={loading} />
-        {!node.online
-          ? <p className="muted">Node is offline; showing revision history only.</p>
-          : <JsonView value={live} empty={loading ? "Loading…" : "No configuration returned."} />}
+        <PanelHeading title="Configuration editor" onRefresh={() => void load()} loading={loading} />
+        <div className="config-toolbar">
+          <div className="mode-switch" aria-label="Editor mode">
+            <button
+              className="button secondary small"
+              aria-pressed={mode === "form"}
+              onClick={() => switchMode("form")}
+            >
+              Form
+            </button>
+            <button
+              className="button secondary small"
+              aria-pressed={mode === "json"}
+              onClick={() => switchMode("json")}
+            >
+              JSON
+            </button>
+          </div>
+          <button className="button" disabled={readOnly || loading || saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        {loading
+          ? <p className="muted">Loading…</p>
+          : mode === "json"
+            ? (
+              <label className="config-json-label">
+                JSON configuration
+                <textarea
+                  className="code-input config-json"
+                  value={jsonText}
+                  readOnly={readOnly}
+                  onChange={(event) => setJsonText(event.target.value)}
+                />
+              </label>
+            )
+            : (
+              <ConfigForm
+                role={role}
+                draft={draft}
+                readOnly={readOnly}
+                onChange={setDraft}
+              />
+            )}
+        {Object.keys(liveMeta).length > 0 && (
+          <div className="config-live-meta">
+            <strong>Restart required: {liveMeta.restart_required === true ? "Yes" : "No"}</strong>
+            <span className="muted">
+              Pending fields: {readStringArray(liveMeta.pending_fields).join(", ") || "None"}
+            </span>
+          </div>
+        )}
       </div>
       <div className="table-shell">
         <table>
@@ -114,6 +251,98 @@ function NodeConfig({ node }: { node: CenterNode }) {
       </div>
     </div>
   );
+}
+
+function ConfigForm({
+  role,
+  draft,
+  readOnly,
+  onChange,
+}: {
+  role: string;
+  draft: JsonObject;
+  readOnly: boolean;
+  onChange: (draft: JsonObject) => void;
+}) {
+  if (role === "server") {
+    return (
+      <div className="config-form">
+        <div className="acl-grid">
+          <label>
+            Allow targets
+            <textarea
+              value={readStringArray(draft.allow_targets).join("\n")}
+              readOnly={readOnly}
+              onChange={(event) => onChange({ ...draft, allow_targets: lines(event.target.value) })}
+            />
+          </label>
+          <label>
+            Deny targets
+            <textarea
+              value={readStringArray(draft.deny_targets).join("\n")}
+              readOnly={readOnly}
+              onChange={(event) => onChange({ ...draft, deny_targets: lines(event.target.value) })}
+            />
+          </label>
+        </div>
+        <label>
+          Compression level
+          <input
+            type="number"
+            value={displayInput(readPath(draft, ["connection", "compression", "level"]))}
+            readOnly={readOnly}
+            onChange={(event) => onChange(setPath(
+              draft,
+              ["connection", "compression", "level"],
+              event.target.value === "" ? "" : Number(event.target.value),
+            ))}
+          />
+        </label>
+      </div>
+    );
+  }
+
+  if (role === "client") {
+    const peers = Array.isArray(draft.peers) ? draft.peers.filter(isObject) : [];
+    return (
+      <div className="config-form peer-list">
+        {peers.length === 0 && <p className="muted">No peers returned.</p>}
+        {peers.map((peer, index) => (
+          <fieldset className="peer-editor" key={itemId(peer) || index}>
+            <legend>Peer {index + 1}</legend>
+            {[
+              ["peer_id", "Peer ID"],
+              ["client_name", "Client name"],
+              ["quic_peer", "QUIC peer"],
+              ["socks_listen", "SOCKS listen"],
+              ["http_listen", "HTTP listen"],
+            ].map(([key, label]) => (
+              <label key={key}>
+                {label}
+                <input
+                  value={displayInput(peer[key])}
+                  readOnly={readOnly}
+                  onChange={(event) => onChange(updatePeer(draft, index, key, event.target.value))}
+                />
+              </label>
+            ))}
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={peer.enabled !== false}
+                disabled={readOnly}
+                onChange={(event) => onChange(updatePeer(draft, index, "enabled", event.target.checked))}
+              />
+              Enabled
+            </label>
+          </fieldset>
+        ))}
+        <p className="muted">Peers can be edited here, but not deleted.</p>
+      </div>
+    );
+  }
+
+  return <p className="muted">No editable fields are available for this node role.</p>;
 }
 
 function NodeOverview({ node }: { node: CenterNode }) {
@@ -363,6 +592,83 @@ function NodeAudit({ node }: { node: CenterNode }) {
 function JsonView({ value, empty = "No data." }: { value: unknown; empty?: string }) {
   if (value === undefined) return <p className="muted">{empty}</p>;
   return <pre className="json-view">{JSON.stringify(value, null, 2)}</pre>;
+}
+
+function connectionMetadata(response: NodeConfigResponse): JsonObject {
+  if (!response.live || !isObject(response.live.connection_config)) return {};
+  return response.live.connection_config;
+}
+
+function parseJsonObject(value: string): JsonObject | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return isObject(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function jsonSnapshot(value: string): string {
+  const parsed = parseJsonObject(value);
+  return parsed ? stableStringify(parsed) : `invalid:${value}`;
+}
+
+function stableStringify(value: unknown): string {
+  return JSON.stringify(sortJson(value));
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortJson);
+  if (!isObject(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .filter((key) => value[key] !== undefined)
+      .map((key) => [key, sortJson(value[key])]),
+  );
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function readPath(value: JsonObject, path: string[]): unknown {
+  let current: unknown = value;
+  for (const key of path) {
+    if (!isObject(current)) return undefined;
+    current = current[key];
+  }
+  return current;
+}
+
+function setPath(value: JsonObject, path: string[], next: unknown): JsonObject {
+  const [key, ...rest] = path;
+  if (!key) return value;
+  return {
+    ...value,
+    [key]: rest.length === 0
+      ? next
+      : setPath(isObject(value[key]) ? value[key] : {}, rest, next),
+  };
+}
+
+function updatePeer(draft: JsonObject, index: number, key: string, value: unknown): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  const peer = isObject(peers[index]) ? peers[index] : {};
+  peers[index] = { ...peer, [key]: value };
+  return { ...draft, peers };
+}
+
+function displayInput(value: unknown): string | number {
+  return typeof value === "string" || typeof value === "number" ? value : "";
+}
+
+function isNodeOfflineError(cause: unknown): boolean {
+  if (!isObject(cause)) return false;
+  const status = cause.status;
+  const dataCode = isObject(cause.data) ? cause.data.code : undefined;
+  const code = cause.code ?? dataCode;
+  return code === "node_offline" && (status === 409 || status === 503);
 }
 
 function itemsFrom(value: unknown, key: string): JsonObject[] {

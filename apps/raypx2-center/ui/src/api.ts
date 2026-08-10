@@ -56,6 +56,37 @@ export interface ConfigRevision {
   created?: string;
 }
 
+export interface NodeConfigResponse {
+  node_key: string;
+  role: string;
+  online: boolean;
+  live: Record<string, unknown> | null;
+  editor_draft: Record<string, unknown>;
+  writable_paths: string[];
+  recent_revisions: ConfigRevision[];
+}
+
+export interface NodeConfigUpdateResult {
+  applied: Record<string, unknown>;
+  ignored_fields: string[];
+  revision_id: string;
+  admin_status: number;
+}
+
+export class CenterRequestError extends Error {
+  status: number;
+  code?: string;
+  data: Record<string, unknown> | null;
+
+  constructor(status: number, message: string, data: Record<string, unknown> | null) {
+    super(`${status}: ${message}`);
+    this.name = "CenterRequestError";
+    this.status = status;
+    this.code = typeof data?.code === "string" ? data.code : undefined;
+    this.data = data;
+  }
+}
+
 export const pb = new PocketBase(window.location.origin);
 
 export async function login(identity: string, password: string) {
@@ -158,6 +189,21 @@ export async function listConfigRevisions(nodeId: string): Promise<ConfigRevisio
   return result.items;
 }
 
+export function getNodeConfig(nodeKey: string): Promise<NodeConfigResponse> {
+  return centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}/config`);
+}
+
+export function putNodeConfig(
+  nodeKey: string,
+  content: Record<string, unknown>,
+): Promise<NodeConfigUpdateResult> {
+  return centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+}
+
 async function centerRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -168,9 +214,12 @@ async function centerRequest<T>(path: string, init: RequestInit = {}): Promise<T
   });
   if (!response.ok) {
     if (response.status === 401) pb.authStore.clear();
-    const body = await response.json().catch(() => null);
+    const rawBody: unknown = await response.json().catch(() => null);
+    const body = typeof rawBody === "object" && rawBody !== null && !Array.isArray(rawBody)
+      ? rawBody as Record<string, unknown>
+      : null;
     const detail = body?.message || body?.code || body?.error || response.statusText || "Request failed";
-    throw new Error(`${response.status}: ${detail}`);
+    throw new CenterRequestError(response.status, String(detail), body);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

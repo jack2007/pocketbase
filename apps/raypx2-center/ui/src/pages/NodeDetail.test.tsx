@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { NodeDetail } from "./NodeDetail";
@@ -8,7 +8,9 @@ vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
   return {
     ...actual,
+    getNodeConfig: vi.fn(),
     listAuditLogs: vi.fn().mockResolvedValue([]),
+    putNodeConfig: vi.fn(),
     proxyNode: vi.fn().mockResolvedValue({}),
   };
 });
@@ -21,9 +23,39 @@ const offlineServer: CenterNode = {
   online: false,
 };
 
+const onlineServer = { ...offlineServer, online: true };
+
+const serverConfig = {
+  node_key: onlineServer.node_key,
+  role: "server",
+  online: true,
+  live: {
+    allow_targets: ["10.0.0.0/8"],
+    deny_targets: [],
+    connection_config: {
+      restart_required: true,
+      pending_fields: ["connection.compression.level"],
+    },
+  },
+  editor_draft: {
+    allow_targets: ["10.0.0.0/8"],
+    deny_targets: [],
+    connection: { compression: { level: 3 } },
+  },
+  writable_paths: ["allow_targets", "deny_targets", "connection.compression.level"],
+  recent_revisions: [],
+};
+
 describe("NodeDetail", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(cleanup);
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.getNodeConfig).mockResolvedValue(serverConfig);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it("disables write controls when the node is offline", async () => {
     render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
@@ -56,5 +88,104 @@ describe("NodeDetail", () => {
 
     expect(screen.getByText("Health")).toBeInTheDocument();
     expect(screen.getByText("healthy")).toBeInTheDocument();
+  });
+
+  it("loads the config editor draft and saves applied content", async () => {
+    const put = vi.mocked(api.putNodeConfig).mockResolvedValue({
+      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+      ignored_fields: ["listen"],
+      revision_id: "rev1",
+      admin_status: 200,
+    });
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    expect(await screen.findByText(/restart required/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(put).toHaveBeenCalledWith(
+      onlineServer.node_key,
+      serverConfig.editor_draft,
+    ));
+    expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
+    expect(screen.getByText("listen")).toBeInTheDocument();
+  });
+
+  it("blocks switching to Form when JSON is invalid", async () => {
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    await screen.findByLabelText("Allow targets");
+
+    fireEvent.click(screen.getByRole("button", { name: "JSON" }));
+    fireEvent.change(screen.getByLabelText("JSON configuration"), { target: { value: "{" } });
+    fireEvent.click(screen.getByRole("button", { name: "Form" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/valid JSON object/i);
+    expect(screen.getByRole("button", { name: "JSON" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("disables config save when offline", async () => {
+    vi.mocked(api.getNodeConfig).mockResolvedValue({
+      ...serverConfig,
+      online: false,
+      live: null,
+      editor_draft: {},
+    });
+    render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByText(/configuration is read-only/i)).toBeInTheDocument();
+  });
+
+  it("treats a 503 node_offline save response as offline and preserves the draft", async () => {
+    vi.mocked(api.putNodeConfig).mockRejectedValue(Object.assign(new Error("node_offline"), {
+      status: 503,
+      code: "node_offline",
+      data: { code: "node_offline" },
+    }));
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    const allowTargets = await screen.findByLabelText("Allow targets");
+    fireEvent.change(allowTargets, { target: { value: "127.0.0.0/8" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/offline/i);
+    expect(screen.getByLabelText("Allow targets")).toHaveValue("127.0.0.0/8");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("confirms before leaving Config when the draft is dirty", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    fireEvent.change(await screen.findByLabelText("Allow targets"), {
+      target: { value: "127.0.0.0/8" },
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+
+    expect(confirm).toHaveBeenCalled();
+    expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
+  });
+});
+
+describe("center config API", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("surfaces HTTP status and error code", async () => {
+    const actual = await vi.importActual<typeof import("../api")>("../api");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ code: "node_offline", message: "node_offline" }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    )));
+
+    await expect(actual.getNodeConfig("node/one")).rejects.toMatchObject({
+      status: 503,
+      code: "node_offline",
+      data: { code: "node_offline" },
+    });
   });
 });
