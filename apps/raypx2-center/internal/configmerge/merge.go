@@ -419,9 +419,7 @@ func trimPeer(peer map[string]any, ignored *[]string) (map[string]any, error) {
 			if err != nil {
 				return nil, err
 			}
-			if len(trimmed) > 0 {
-				out[key] = trimmed
-			}
+			out[key] = trimmed
 		default:
 			out[key] = value
 		}

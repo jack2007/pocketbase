@@ -344,6 +344,27 @@ func TestTrimForRoleClientTrimsNonWhitelistPeerFields(t *testing.T) {
 	}
 }
 
+func TestTrimForRoleClientKeepsEmptyPortForwards(t *testing.T) {
+	t.Parallel()
+	patch, _, err := TrimForRole("client", map[string]any{
+		"peers": []any{map[string]any{
+			"peer_id":       "peer-a",
+			"port_forwards": []any{},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := patch["peers"].([]any)[0].(map[string]any)
+	forwards, ok := peer["port_forwards"]
+	if !ok {
+		t.Fatal("port_forwards must be preserved in patch")
+	}
+	if len(forwards.([]any)) != 0 {
+		t.Fatalf("port_forwards=%#v want empty slice", forwards)
+	}
+}
+
 func TestTrimForRoleClientRejectsFractionalSendRate(t *testing.T) {
 	t.Parallel()
 	_, _, err := TrimForRole("client", map[string]any{
