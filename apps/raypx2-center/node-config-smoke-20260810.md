@@ -19,7 +19,22 @@ local raypx2 client and server agents. Authentication used PocketBase's
 - PASS — After stopping the client agent and observing `online=false`, Save
   returned `409 node_offline`.
 
-Overall result after the fix: automated coverage passes for ignoring startup-only
-rates while preserving writable peer updates and untouched peers. A fresh manual
-Step 3 re-smoke remains open because no local center/node process was running;
-repeat it with a writable field such as `socks_listen` or `enabled`.
+Automated coverage after the fix passed for ignoring startup-only rates while
+preserving writable peer updates and untouched peers. The manual Step 3 gap was
+then closed by the re-smoke below.
+
+## Step 3 re-smoke after rate remediation
+
+- PASS — A fresh current-`master` center ran on `127.0.0.1:18091` with a
+  temporary two-peer local client enrolled and online.
+- PASS — Config PUT changed only peer `primary`'s `socks_listen` from
+  `127.0.0.1:19380` to `127.0.0.1:19382`; Admin returned 200.
+- PASS — Peer `secondary` remained present with its original SOCKS listener,
+  compression settings, encryption, and rates. Both peers retained
+  `encryption=enabled`.
+- PASS — Submitted `min_send_rate_kbps=1234` and
+  `max_send_rate_kbps=5678` appeared in `ignored_fields`; live values remained
+  0/0 for `primary` and 1000/9000 for `secondary`.
+- PASS — The focused `TrimForRole` rate-ignore test passed.
+
+The remaining manual Step 3 gap is closed.
