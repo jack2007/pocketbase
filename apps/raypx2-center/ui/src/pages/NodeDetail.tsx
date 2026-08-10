@@ -49,7 +49,9 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
             role="tab"
             aria-selected={tab === item}
             className={tab === item ? "active" : ""}
-            onClick={() => leaveConfig(() => setTab(item))}
+            onClick={() => {
+              if (item !== tab) leaveConfig(() => setTab(item));
+            }}
           >
             {title(item)}
           </button>
@@ -150,9 +152,15 @@ function NodeConfig({
     setIgnored([]);
     try {
       const result = await putNodeConfig(node.node_key, content);
-      setDraft(result.applied);
-      setJsonText(JSON.stringify(result.applied, null, 2));
-      setBaseline(stableStringify(result.applied));
+      const response = await getNodeConfig(node.node_key);
+      const nextDraft = response.editor_draft || {};
+      setDraft(nextDraft);
+      setJsonText(JSON.stringify(nextDraft, null, 2));
+      setBaseline(stableStringify(nextDraft));
+      setRole(response.role);
+      setOnline(response.online);
+      setLiveMeta(connectionMetadata(response));
+      setRevisions(response.recent_revisions || []);
       setIgnored(result.ignored_fields || []);
     } catch (cause) {
       if (isNodeOfflineError(cause)) {
@@ -234,16 +242,14 @@ function NodeConfig({
       </div>
       <div className="table-shell">
         <table>
-          <thead><tr><th>Time</th><th>Kind</th><th>Source</th><th>Summary</th><th>Content</th></tr></thead>
+          <thead><tr><th>Time</th><th>Kind</th><th>Source</th></tr></thead>
           <tbody>
-            {revisions.length === 0 && <EmptyRow columns={5} loading={loading} />}
+            {revisions.length === 0 && <EmptyRow columns={3} loading={loading} />}
             {revisions.map((revision) => (
               <tr key={revision.id}>
                 <td>{formatDate(revision.created)}</td>
                 <td><span className="tag">{revision.kind}</span></td>
                 <td>{revision.source}</td>
-                <td>{revision.diff_summary || "—"}</td>
-                <td><details><summary>View JSON</summary><JsonView value={revision.content} /></details></td>
               </tr>
             ))}
           </tbody>

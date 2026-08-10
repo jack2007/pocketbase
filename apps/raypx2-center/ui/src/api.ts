@@ -47,13 +47,9 @@ export interface ApplyJob {
 
 export interface ConfigRevision {
   id: string;
-  node: string;
   kind: "actual" | "desired";
   source: string;
-  content_hash: string;
-  content: Record<string, unknown>;
-  diff_summary?: string;
-  created?: string;
+  created: string;
 }
 
 export interface NodeConfigResponse {

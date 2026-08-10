@@ -90,13 +90,32 @@ describe("NodeDetail", () => {
     expect(screen.getByText("healthy")).toBeInTheDocument();
   });
 
-  it("loads the config editor draft and saves applied content", async () => {
+  it("re-fetches config metadata and revisions after saving", async () => {
     const put = vi.mocked(api.putNodeConfig).mockResolvedValue({
       applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
       ignored_fields: ["listen"],
       revision_id: "rev1",
       admin_status: 200,
     });
+    vi.mocked(api.getNodeConfig)
+      .mockResolvedValueOnce(serverConfig)
+      .mockResolvedValueOnce({
+        ...serverConfig,
+        live: {
+          ...serverConfig.live,
+          connection_config: {
+            restart_required: false,
+            pending_fields: [],
+          },
+        },
+        editor_draft: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+        recent_revisions: [{
+          id: "rev1",
+          kind: "desired",
+          source: "manual_edit",
+          created: "2026-08-10T12:00:00Z",
+        }],
+      });
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
@@ -108,8 +127,13 @@ describe("NodeDetail", () => {
       onlineServer.node_key,
       serverConfig.editor_draft,
     ));
+    await waitFor(() => expect(api.getNodeConfig).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
     expect(screen.getByText("listen")).toBeInTheDocument();
+    expect(screen.getByText("Restart required: No")).toBeInTheDocument();
+    expect(screen.getByText("manual_edit")).toBeInTheDocument();
+    expect(screen.queryByText("View JSON")).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Summary" })).not.toBeInTheDocument();
   });
 
   it("blocks switching to Form when JSON is invalid", async () => {
@@ -169,6 +193,19 @@ describe("NodeDetail", () => {
 
     expect(confirm).toHaveBeenCalled();
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("does not confirm when clicking the active Config tab", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    fireEvent.change(await screen.findByLabelText("Allow targets"), {
+      target: { value: "127.0.0.0/8" },
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
 
