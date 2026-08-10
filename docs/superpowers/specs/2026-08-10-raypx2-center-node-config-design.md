@@ -1,7 +1,8 @@
 # raypx2 Center 单节点在线配置设计
 
 **日期：** 2026-08-10  
-**状态：** 对话设计已批准；待用户审阅本文件  
+**状态：** 已批准  
+**实现计划：** [docs/superpowers/plans/2026-08-10-raypx2-center-node-config.md](../plans/2026-08-10-raypx2-center-node-config.md)  
 **范围仓库：** `/home/jack/src/pocketbase`（`apps/raypx2-center`）  
 **前置：** Agent 出站连接、Admin proxy、节点在线态已可用（见 `2026-08-08-raypx2-center-console-design.md` 与 raypx2 e2e 冒烟）
 
