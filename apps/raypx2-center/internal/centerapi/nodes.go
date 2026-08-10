@@ -83,7 +83,82 @@ func (api *API) HandleListNodes(e *core.RequestEvent) error {
 	if err != nil {
 		return e.InternalServerError("Failed to list nodes.", err)
 	}
-	return e.JSON(http.StatusOK, map[string]any{"items": nodes})
+	statuses, err := e.App.FindRecordsByFilter("node_status", "", "", 1000, 0)
+	if err != nil {
+		return e.InternalServerError("Failed to list node status.", err)
+	}
+	healthByNode := make(map[string]string, len(statuses))
+	for _, status := range statuses {
+		healthByNode[status.GetString("node")] = status.GetString("health_status")
+	}
+	items := make([]map[string]any, 0, len(nodes))
+	for _, node := range nodes {
+		item := node.PublicExport()
+		if health, ok := healthByNode[node.Id]; ok && health != "" {
+			item["health_status"] = health
+		}
+		items = append(items, item)
+	}
+	return e.JSON(http.StatusOK, map[string]any{"items": items})
+}
+
+// HandleDeleteNode permanently removes a node and disconnects its agent.
+func (api *API) HandleDeleteNode(e *core.RequestEvent) error {
+	nodeKey := e.Request.PathValue("node_key")
+	node, err := e.App.FindFirstRecordByData("nodes", "node_key", nodeKey)
+	if err != nil {
+		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
+	}
+	summary := map[string]any{
+		"node_key": node.GetString("node_key"),
+		"name":     node.GetString("name"),
+		"role":     node.GetString("role"),
+	}
+
+	err = e.App.RunInTransaction(func(txApp core.App) error {
+		if err := deleteRecordsByNode(txApp, "config_revisions", node.Id); err != nil {
+			return err
+		}
+		if err := deleteRecordsByNode(txApp, "apply_job_targets", node.Id); err != nil {
+			return err
+		}
+		if err := txApp.Delete(node); err != nil {
+			return err
+		}
+		return audit.RecordManagement(
+			txApp, actorID(e), audit.ActionNodeDelete, "", e.RemoteIP(), summary,
+		)
+	})
+	if err != nil {
+		return e.JSON(http.StatusConflict, errorResponse("node_delete_failed"))
+	}
+
+	api.hub.Kick(nodeKey, "deleted")
+	return e.NoContent(http.StatusNoContent)
+}
+
+func deleteRecordsByNode(app core.App, collection, nodeID string) error {
+	for {
+		records, err := app.FindRecordsByFilter(
+			collection,
+			"node = {:node}",
+			"",
+			500,
+			0,
+			map[string]any{"node": nodeID},
+		)
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			return nil
+		}
+		for _, record := range records {
+			if err := app.Delete(record); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // HandleRotateEnroll replaces a node's enrollment secret and disconnects active agents.

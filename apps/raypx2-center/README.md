@@ -54,8 +54,15 @@ not disable certificate verification.
 
 Enrollment secrets are returned only when a node is created or its secret is
 rotated. Store the returned value in the agent's secret store and never put it
-in logs. The superuser-only hardening endpoints are:
+in logs. The superuser-only node management endpoints are:
 
+- `GET /api/center/nodes`: lists nodes and merges `health_status` from
+  `node_status` (agent `status_summary`) into each item.
+- `POST /api/center/nodes`: creates a node and returns a one-time
+  `enroll_secret`.
+- `DELETE /api/center/nodes/{node_key}`: permanently deletes the node, cleans
+  related revisions/targets, cascades sessions/status, writes an audit log, and
+  disconnects the agent with `bye {"reason":"deleted"}`.
 - `POST /api/center/nodes/{node_key}/rotate-enroll`: returns a new one-time
   `enroll_secret`, invalidates the old secret and sessions, and disconnects the
   current WebSocket with `bye {"reason":"rotated"}`.
@@ -67,6 +74,9 @@ After rotation, update the agent with the new secret before restarting it.
 After revocation, enrollment remains blocked until an operator rotates the
 secret, which reactivates enrollment.
 
+The Nodes console auto-refreshes every 10 seconds, exposes Delete on each row,
+and shows Health from the merged `health_status` field on the Overview tab.
+
 ## M1 manual smoke check
 
 Real raypx2 Agent wiring is deferred for this milestone.
@@ -77,3 +87,6 @@ Real raypx2 Agent wiring is deferred for this milestone.
 4. Open **Nodes**, create a node, and save the one-time enrollment secret.
 5. Verify the new node is listed and `GET /api/center/nodes` succeeds with the
    superuser token.
+6. With an online agent reporting status, confirm Health shows a value such as
+   `healthy` instead of Unknown.
+7. Delete a node from the UI and confirm it disappears after refresh.

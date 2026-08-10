@@ -137,6 +137,7 @@ func bindCenterAPIRoutes(t testing.TB, _ *tests.TestApp, e *core.ServeEvent) {
 	center := e.Router.Group("/api/center").Bind(RequireSuperuserAuth())
 	center.POST("/nodes", api.HandleCreateNode)
 	center.GET("/nodes", api.HandleListNodes)
+	center.DELETE("/nodes/{node_key}", api.HandleDeleteNode)
 	center.GET("/templates", api.HandleListTemplates)
 	center.GET("/apply-jobs", api.HandleListApplyJobs)
 }

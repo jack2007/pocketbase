@@ -10,6 +10,7 @@ const (
 	ActionAgentEnroll    = "agent.enroll"
 	ActionProxyRequest   = "proxy.request"
 	ActionNodeCreate     = "node.create"
+	ActionNodeDelete     = "node.delete"
 	ActionNodeRotate     = "node.rotate_enroll"
 	ActionNodeRevoke     = "node.revoke"
 	ActionTemplateCreate = "template.create"

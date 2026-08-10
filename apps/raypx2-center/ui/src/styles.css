@@ -81,6 +81,8 @@ input:focus, select:focus { border-color: #7ca840; box-shadow: 0 0 0 3px #b8f55c
 .button:hover { background: #27312c; }
 .button:disabled { cursor: not-allowed; opacity: .55; }
 .button.secondary { border-color: var(--line); color: var(--ink); background: white; }
+.button.danger { border-color: #d9b0a8; color: #9a2f2f; background: #fff5f2; }
+.button.danger:hover { background: #ffe8e2; }
 .button.full { width: 100%; margin-top: .65rem; }
 .login-card .button { color: var(--dark); background: var(--green); border-color: var(--green); }
 .form-error, .alert { color: #a63030; background: #fff0ed; border: 1px solid #f2c4ba; border-radius: 8px; padding: .7rem .8rem; font-size: .85rem; }

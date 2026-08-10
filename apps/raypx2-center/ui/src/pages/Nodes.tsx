@@ -16,12 +16,14 @@ interface NodesProps {
   loading: boolean;
   onRefresh: () => void;
   onCreate?: (input: CreateNodeInput) => Promise<CreateNodeResult>;
+  onDelete?: (node: CenterNode) => Promise<void>;
   onSelect?: (node: CenterNode) => void;
 }
 
-export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesProps) {
+export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect }: NodesProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [deletingKey, setDeletingKey] = useState("");
   const [error, setError] = useState("");
   const [secret, setSecret] = useState("");
 
@@ -42,6 +44,21 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesPr
       setError(cause instanceof Error ? cause.message : "Unable to create node.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function remove(node: CenterNode) {
+    if (!onDelete) return;
+    const label = node.name || node.node_key;
+    if (!window.confirm(`Delete node "${label}"? This cannot be undone.`)) return;
+    setDeletingKey(node.node_key);
+    setError("");
+    try {
+      await onDelete(node);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to delete node.");
+    } finally {
+      setDeletingKey("");
     }
   }
 
@@ -71,6 +88,8 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesPr
         </div>
       </div>
 
+      {error && !dialogOpen && <div className="alert" role="alert">{error}</div>}
+
       <div className="table-shell">
         <table>
           <thead>
@@ -81,12 +100,13 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesPr
               <th>Status</th>
               <th>Health</th>
               <th>Last seen</th>
+              {onDelete && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {!loading && nodes.length === 0 && (
               <tr>
-                <td colSpan={6} className="empty">No nodes yet. Create one to get started.</td>
+                <td colSpan={onDelete ? 7 : 6} className="empty">No nodes yet. Create one to get started.</td>
               </tr>
             )}
             {nodes.map((node) => (
@@ -106,6 +126,17 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onSelect }: NodesPr
                 </td>
                 <td>{node.health_status || "—"}</td>
                 <td>{formatDate(node.last_seen_at)}</td>
+                {onDelete && (
+                  <td>
+                    <button
+                      className="button danger small"
+                      disabled={deletingKey === node.node_key}
+                      onClick={() => void remove(node)}
+                    >
+                      {deletingKey === node.node_key ? "Deleting…" : "Delete"}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

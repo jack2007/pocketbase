@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { Nodes, type CenterNode } from "./Nodes";
 
 describe("Nodes", () => {
@@ -12,6 +12,7 @@ describe("Nodes", () => {
         role: "server",
         online: true,
         last_seen_at: "2026-08-08 12:00:00.000Z",
+        health_status: "healthy",
       },
     ];
 
@@ -20,5 +21,34 @@ describe("Nodes", () => {
     expect(screen.getByText("Singapore edge")).toBeInTheDocument();
     expect(screen.getByText("edge-sg-1")).toBeInTheDocument();
     expect(screen.getByText("Online")).toBeInTheDocument();
+    expect(screen.getByText("healthy")).toBeInTheDocument();
+  });
+
+  it("calls onDelete after confirmation", async () => {
+    const onDelete = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const nodes: CenterNode[] = [
+      {
+        id: "node-1",
+        node_key: "edge-sg-1",
+        name: "Singapore edge",
+        role: "server",
+        online: false,
+      },
+    ];
+
+    render(
+      <Nodes
+        nodes={nodes}
+        loading={false}
+        onRefresh={() => undefined}
+        onDelete={onDelete}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(onDelete).toHaveBeenCalledWith(nodes[0]);
+    confirmSpy.mockRestore();
   });
 });

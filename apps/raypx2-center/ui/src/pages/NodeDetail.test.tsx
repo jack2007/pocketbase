@@ -45,4 +45,16 @@ describe("NodeDetail", () => {
     expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/config");
     expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/connections");
   });
+
+  it("shows health status from the node record on Overview", () => {
+    render(
+      <NodeDetail
+        node={{ ...offlineServer, health_status: "healthy" }}
+        onBack={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Health")).toBeInTheDocument();
+    expect(screen.getByText("healthy")).toBeInTheDocument();
+  });
 });

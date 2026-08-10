@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { createNode, listNodes, login, logout, pb, type CreateNodeInput } from "./api";
+import { createNode, deleteNode, listNodes, login, logout, pb, type CreateNodeInput } from "./api";
 import { Login } from "./pages/Login";
 import { ApplyJobs } from "./pages/ApplyJobs";
 import { NodeDetail } from "./pages/NodeDetail";
@@ -8,6 +8,8 @@ import { Overview } from "./pages/Overview";
 import { Templates } from "./pages/Templates";
 
 type Page = "overview" | "nodes" | "templates" | "apply-jobs";
+
+const REFRESH_INTERVAL_MS = 10_000;
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(pb.authStore.isValid);
@@ -19,32 +21,49 @@ export default function App() {
 
   useEffect(() => pb.authStore.onChange(() => setAuthenticated(pb.authStore.isValid)), []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { quiet?: boolean }) => {
     if (!pb.authStore.isValid) return;
-    setLoading(true);
+    if (!options?.quiet) setLoading(true);
     setError("");
     try {
-      setNodes(await listNodes());
+      const items = await listNodes();
+      setNodes(items);
+      setSelectedNode((current) => {
+        if (!current) return current;
+        return items.some((node) => node.id === current.id) ? current : undefined;
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load nodes.");
     } finally {
-      setLoading(false);
+      if (!options?.quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (authenticated) void refresh();
+    if (!authenticated) return;
+    void refresh();
+    const timer = window.setInterval(() => void refresh({ quiet: true }), REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
   }, [authenticated, refresh]);
 
   async function handleCreate(input: CreateNodeInput) {
     const result = await createNode(input);
-    await refresh();
+    await refresh({ quiet: true });
     return result;
+  }
+
+  async function handleDelete(node: CenterNode) {
+    await deleteNode(node.node_key);
+    await refresh({ quiet: true });
   }
 
   if (!authenticated) {
     return <Login onLogin={login} />;
   }
+
+  const detailNode = selectedNode
+    ? nodes.find((node) => node.id === selectedNode.id) ?? selectedNode
+    : undefined;
 
   return (
     <div className="app-shell">
@@ -79,17 +98,18 @@ export default function App() {
           <Templates />
         ) : page === "apply-jobs" ? (
           <ApplyJobs nodes={nodes} />
-        ) : selectedNode ? (
+        ) : detailNode ? (
           <NodeDetail
-            node={nodes.find((node) => node.id === selectedNode.id) ?? selectedNode}
+            node={detailNode}
             onBack={() => setSelectedNode(undefined)}
           />
         ) : (
           <Nodes
             nodes={nodes}
             loading={loading}
-            onRefresh={refresh}
+            onRefresh={() => void refresh()}
             onCreate={handleCreate}
+            onDelete={handleDelete}
             onSelect={setSelectedNode}
           />
         )}

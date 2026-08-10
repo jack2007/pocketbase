@@ -39,6 +39,7 @@ func main() {
 		center := e.Router.Group("/api/center").Bind(centerapi.RequireSuperuserAuth())
 		center.POST("/nodes", centerAPI.HandleCreateNode)
 		center.GET("/nodes", centerAPI.HandleListNodes)
+		center.DELETE("/nodes/{node_key}", centerAPI.HandleDeleteNode)
 		center.POST("/nodes/{node_key}/rotate-enroll", centerAPI.HandleRotateEnroll)
 		center.POST("/nodes/{node_key}/revoke", centerAPI.HandleRevokeNode)
 		center.POST("/nodes/{node_key}/proxy", centerAPI.HandleProxy)

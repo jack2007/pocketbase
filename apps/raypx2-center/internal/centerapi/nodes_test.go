@@ -109,3 +109,84 @@ func TestRotateAndRevokeNodeAreAuditedWithoutSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestListNodesIncludesHealthStatus(t *testing.T) {
+	app, node, auth := newCenterTestApp(t)
+	api := New(agenthub.New())
+	statuses, err := app.FindCollectionByNameOrId("node_status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := core.NewRecord(statuses)
+	status.Set("node", node.Id)
+	status.Set("health_status", "healthy")
+	if err := app.Save(status); err != nil {
+		t.Fatal(err)
+	}
+
+	listed := performCenterRequest(t, app, auth, http.MethodGet,
+		"/api/center/nodes", "", nil, api.HandleListNodes)
+	if listed.Code != http.StatusOK {
+		t.Fatalf("list response = %d %s", listed.Code, listed.Body.String())
+	}
+	if !bytes.Contains(listed.Body.Bytes(), []byte(`"health_status":"healthy"`)) {
+		t.Fatalf("list missing health status: %s", listed.Body.String())
+	}
+}
+
+func TestDeleteNodeRemovesRecordAndAudits(t *testing.T) {
+	app, node, auth := newCenterTestApp(t)
+	api := New(agenthub.New())
+	nodeKey := node.GetString("node_key")
+
+	revisions, err := app.FindCollectionByNameOrId("config_revisions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := core.NewRecord(revisions)
+	revision.Set("node", node.Id)
+	revision.Set("kind", "actual")
+	revision.Set("source", "pull")
+	revision.Set("content_hash", "abc")
+	revision.Set("content", map[string]any{"role": "server"})
+	if err := app.Save(revision); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted := performCenterRequest(
+		t,
+		app,
+		auth,
+		http.MethodDelete,
+		"/api/center/nodes/"+nodeKey,
+		nodeKey,
+		nil,
+		api.HandleDeleteNode,
+	)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete response = %d %s", deleted.Code, deleted.Body.String())
+	}
+	if _, err := app.FindFirstRecordByData("nodes", "node_key", nodeKey); err == nil {
+		t.Fatal("expected node to be deleted")
+	}
+	logs, err := app.FindRecordsByFilter(
+		"audit_logs",
+		"action = 'node.delete'",
+		"",
+		10,
+		0,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(logs) != 1 || logs[0].GetString("actor") != auth.Id {
+		t.Fatalf("delete audits = %#v", logs)
+	}
+	summary, err := json.Marshal(logs[0].Get("request_summary"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(summary, []byte(nodeKey)) {
+		t.Fatalf("delete audit missing node_key: %s", summary)
+	}
+}

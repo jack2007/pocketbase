@@ -79,6 +79,10 @@ export function createNode(input: CreateNodeInput): Promise<CreateNodeResult> {
   });
 }
 
+export async function deleteNode(nodeKey: string): Promise<void> {
+  await centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}`, { method: "DELETE" });
+}
+
 export function proxyNode<T = unknown>(
   nodeKey: string,
   method: string,

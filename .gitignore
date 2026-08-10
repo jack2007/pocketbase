@@ -3,6 +3,9 @@
 
 .DS_Store
 
+# local build output and runtime data
+/bin/
+
 # goreleaser builds folder
 /.builds/
 
