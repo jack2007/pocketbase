@@ -1,6 +1,7 @@
 package configmerge
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -136,6 +137,42 @@ func TestTrimForRoleServerKeepsACLAndCompressionIgnoresRest(t *testing.T) {
 	joined := strings.Join(ignored, ",")
 	if !strings.Contains(joined, "listen") || !strings.Contains(joined, "max_send_rate_kbps") {
 		t.Fatalf("ignored=%v", ignored)
+	}
+}
+
+func TestTrimForRoleServerRejectsInvalidCompressionLevel(t *testing.T) {
+	t.Parallel()
+	for _, level := range []any{float64(0), float64(23), float64(1.5), "3"} {
+		level := level
+		t.Run(fmt.Sprint(level), func(t *testing.T) {
+			t.Parallel()
+			_, _, err := TrimForRole("server", map[string]any{
+				"connection": map[string]any{
+					"compression": map[string]any{"level": level},
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), "integer between 1 and 22") {
+				t.Fatalf("err=%v, want compression level range error", err)
+			}
+		})
+	}
+}
+
+func TestMergeServerConfigRejectsInvalidCompressionLevel(t *testing.T) {
+	t.Parallel()
+	for _, level := range []any{float64(-1), float64(22.5), float64(99), nil} {
+		level := level
+		t.Run(fmt.Sprint(level), func(t *testing.T) {
+			t.Parallel()
+			_, err := MergeServerConfig(map[string]any{}, map[string]any{
+				"connection": map[string]any{
+					"compression": map[string]any{"level": level},
+				},
+			})
+			if err == nil || !strings.Contains(err.Error(), "integer between 1 and 22") {
+				t.Fatalf("err=%v, want compression level range error", err)
+			}
+		})
 	}
 }
 

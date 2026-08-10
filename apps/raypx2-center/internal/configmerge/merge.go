@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -103,9 +104,12 @@ func MergeServerConfig(actual, templateBody map[string]any) (map[string]any, err
 				if !ok {
 					return nil, errors.New("connection.compression must be an object")
 				}
-				for compressionKey := range compression {
+				for compressionKey, compressionValue := range compression {
 					if compressionKey != "level" {
 						return nil, fmt.Errorf("server template connection.compression field %q is not allowed", compressionKey)
+					}
+					if err := validateCompressionLevel(compressionValue); err != nil {
+						return nil, err
 					}
 				}
 			}
@@ -338,6 +342,9 @@ func trimServer(content map[string]any) (map[string]any, []string, error) {
 						if compressionKey != "level" {
 							ignored = append(ignored, "connection.compression."+compressionKey)
 							continue
+						}
+						if err := validateCompressionLevel(compressionValue); err != nil {
+							return nil, nil, err
 						}
 						levelPatch[compressionKey] = compressionValue
 					}
@@ -641,6 +648,42 @@ func stringArray(name string, value any) error {
 		if _, ok := item.(string); !ok {
 			return fmt.Errorf("%s must contain only strings", name)
 		}
+	}
+	return nil
+}
+
+func validateCompressionLevel(value any) error {
+	var level float64
+	switch typed := value.(type) {
+	case int:
+		level = float64(typed)
+	case int8:
+		level = float64(typed)
+	case int16:
+		level = float64(typed)
+	case int32:
+		level = float64(typed)
+	case int64:
+		level = float64(typed)
+	case uint:
+		level = float64(typed)
+	case uint8:
+		level = float64(typed)
+	case uint16:
+		level = float64(typed)
+	case uint32:
+		level = float64(typed)
+	case uint64:
+		level = float64(typed)
+	case float32:
+		level = float64(typed)
+	case float64:
+		level = typed
+	default:
+		return errors.New("connection.compression.level must be an integer between 1 and 22")
+	}
+	if math.Trunc(level) != level || level < 1 || level > 22 {
+		return errors.New("connection.compression.level must be an integer between 1 and 22")
 	}
 	return nil
 }

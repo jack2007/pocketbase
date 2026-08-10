@@ -196,6 +196,62 @@ describe("NodeDetail", () => {
     expect(screen.getByText(/configuration is read-only/i)).toBeInTheDocument();
   });
 
+  it("constrains server compression level and blocks invalid saves", async () => {
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    const level = await screen.findByLabelText("Compression level");
+    expect(level).toHaveAttribute("min", "1");
+    expect(level).toHaveAttribute("max", "22");
+    expect(level).toHaveAttribute("step", "1");
+
+    fireEvent.change(level, { target: { value: "23" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/integer between 1 and 22/i);
+    expect(api.putNodeConfig).not.toHaveBeenCalled();
+  });
+
+  it("edits client port forwards and QUIC connections while keeping peer ID read-only", async () => {
+    vi.mocked(api.getNodeConfig).mockResolvedValue({
+      ...serverConfig,
+      role: "client",
+      editor_draft: {
+        peers: [{
+          peer_id: "peer-a",
+          quic_peer: "edge.example:4433",
+          quic_connections: 2,
+          port_forwards: [{ listen: ":8080", target: "127.0.0.1:80" }],
+          enabled: true,
+        }],
+      },
+      writable_paths: [
+        "peers[].peer_id",
+        "peers[].port_forwards",
+        "peers[].quic_connections",
+      ],
+    });
+    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    expect(await screen.findByLabelText("Peer ID")).toHaveAttribute("readonly");
+    const connections = screen.getByLabelText("QUIC connections");
+    expect(connections).toHaveAttribute("type", "number");
+    expect(connections).toHaveAttribute("step", "1");
+    fireEvent.change(connections, { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("Port forward 1 listen"), {
+      target: { value: ":9090" },
+    });
+    fireEvent.change(screen.getByLabelText("Port forward 1 target"), {
+      target: { value: "127.0.0.1:90" },
+    });
+
+    expect(connections).toHaveValue(4);
+    expect(screen.getByLabelText("Port forward 1 listen")).toHaveValue(":9090");
+    expect(screen.getByLabelText("Port forward 1 target")).toHaveValue("127.0.0.1:90");
+    expect(screen.getByRole("button", { name: "Add port forward" })).toBeEnabled();
+  });
+
   it("treats a 503 node_offline save response as offline and preserves the draft", async () => {
     vi.mocked(api.putNodeConfig).mockRejectedValue(Object.assign(new Error("node_offline"), {
       status: 503,

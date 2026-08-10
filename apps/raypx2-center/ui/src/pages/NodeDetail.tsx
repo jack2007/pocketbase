@@ -154,6 +154,11 @@ function NodeConfig({
       content = parsed;
       setDraft(parsed);
     }
+    const validationError = validateConfig(role, content);
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
     if (readOnly) return;
     setSaving(true);
     setError("");
@@ -307,6 +312,9 @@ function ConfigForm({
           Compression level
           <input
             type="number"
+            min={1}
+            max={22}
+            step={1}
             value={displayInput(readPath(draft, ["connection", "compression", "level"]))}
             readOnly={readOnly}
             onChange={(event) => onChange(setPath(
@@ -328,8 +336,11 @@ function ConfigForm({
         {peers.map((peer, index) => (
           <fieldset className="peer-editor" key={itemId(peer) || index}>
             <legend>Peer {index + 1}</legend>
+            <label>
+              Peer ID
+              <input value={displayInput(peer.peer_id)} readOnly />
+            </label>
             {[
-              ["peer_id", "Peer ID"],
               ["client_name", "Client name"],
               ["quic_peer", "QUIC peer"],
               ["socks_listen", "SOCKS listen"],
@@ -344,6 +355,74 @@ function ConfigForm({
                 />
               </label>
             ))}
+            <label>
+              QUIC connections
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={displayInput(peer.quic_connections)}
+                readOnly={readOnly}
+                onChange={(event) => onChange(updatePeer(
+                  draft,
+                  index,
+                  "quic_connections",
+                  event.target.value === "" ? "" : Number(event.target.value),
+                ))}
+              />
+            </label>
+            <div className="port-forward-list">
+              <strong>Port forwards</strong>
+              {(Array.isArray(peer.port_forwards) ? peer.port_forwards.filter(isObject) : []).map((forward, forwardIndex) => (
+                <fieldset key={forwardIndex}>
+                  <legend>Port forward {forwardIndex + 1}</legend>
+                  <label>
+                    Port forward {forwardIndex + 1} listen
+                    <input
+                      value={displayInput(forward.listen)}
+                      readOnly={readOnly}
+                      onChange={(event) => onChange(updatePeerPortForward(
+                        draft,
+                        index,
+                        forwardIndex,
+                        "listen",
+                        event.target.value,
+                      ))}
+                    />
+                  </label>
+                  <label>
+                    Port forward {forwardIndex + 1} target
+                    <input
+                      value={displayInput(forward.target)}
+                      readOnly={readOnly}
+                      onChange={(event) => onChange(updatePeerPortForward(
+                        draft,
+                        index,
+                        forwardIndex,
+                        "target",
+                        event.target.value,
+                      ))}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="button secondary small"
+                    disabled={readOnly}
+                    onClick={() => onChange(removePeerPortForward(draft, index, forwardIndex))}
+                  >
+                    Remove port forward {forwardIndex + 1}
+                  </button>
+                </fieldset>
+              ))}
+              <button
+                type="button"
+                className="button secondary small"
+                disabled={readOnly}
+                onClick={() => onChange(addPeerPortForward(draft, index))}
+              >
+                Add port forward
+              </button>
+            </div>
             <label className="checkbox-label">
               <input
                 type="checkbox"
@@ -635,6 +714,50 @@ function updatePeer(draft: JsonObject, index: number, key: string, value: unknow
   const peer = isObject(peers[index]) ? peers[index] : {};
   peers[index] = { ...peer, [key]: value };
   return { ...draft, peers };
+}
+
+function updatePeerPortForward(
+  draft: JsonObject,
+  peerIndex: number,
+  forwardIndex: number,
+  key: "listen" | "target",
+  value: string,
+): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  const peer = isObject(peers[peerIndex]) ? peers[peerIndex] : {};
+  const forwards = Array.isArray(peer.port_forwards) ? [...peer.port_forwards] : [];
+  const forward = isObject(forwards[forwardIndex]) ? forwards[forwardIndex] : {};
+  forwards[forwardIndex] = { ...forward, [key]: value };
+  peers[peerIndex] = { ...peer, port_forwards: forwards };
+  return { ...draft, peers };
+}
+
+function addPeerPortForward(draft: JsonObject, peerIndex: number): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  const peer = isObject(peers[peerIndex]) ? peers[peerIndex] : {};
+  const forwards = Array.isArray(peer.port_forwards) ? [...peer.port_forwards] : [];
+  forwards.push({ listen: "", target: "" });
+  peers[peerIndex] = { ...peer, port_forwards: forwards };
+  return { ...draft, peers };
+}
+
+function removePeerPortForward(draft: JsonObject, peerIndex: number, forwardIndex: number): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  const peer = isObject(peers[peerIndex]) ? peers[peerIndex] : {};
+  const forwards = Array.isArray(peer.port_forwards) ? [...peer.port_forwards] : [];
+  forwards.splice(forwardIndex, 1);
+  peers[peerIndex] = { ...peer, port_forwards: forwards };
+  return { ...draft, peers };
+}
+
+function validateConfig(role: string, draft: JsonObject): string {
+  if (role !== "server") return "";
+  const level = readPath(draft, ["connection", "compression", "level"]);
+  if (level === undefined) return "";
+  if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > 22) {
+    return "Compression level must be an integer between 1 and 22.";
+  }
+  return "";
 }
 
 function displayInput(value: unknown): string | number {
