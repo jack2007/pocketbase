@@ -589,31 +589,27 @@ func deepMergeMap(base, patch map[string]any) map[string]any {
 }
 
 func rejectSecrets(value any) error {
+	return rejectSecretsIn(value, "")
+}
+
+func rejectSecretsIn(value any, parent string) error {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
 			normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
-			if normalized == "admin_token" || normalized == "token" ||
-				normalized == "private_key" || normalized == "tls_key" ||
-				normalized == "enroll_secret" || normalized == "enroll_secret_file" ||
-				strings.Contains(normalized, "enroll_secret") ||
-				(normalized == "key" && strings.Contains(strings.ToLower(fmt.Sprint(value)), "tls")) {
+			if strings.Contains(normalized, "token") || strings.Contains(normalized, "password") ||
+				strings.Contains(normalized, "secret") || normalized == "private_key" ||
+				normalized == "tls_key" ||
+				(normalized == "key" && strings.EqualFold(parent, "tls")) {
 				return fmt.Errorf("%w: %s", errSecretField, key)
 			}
-			if strings.EqualFold(key, "tls") {
-				if object, ok := child.(map[string]any); ok {
-					if _, exists := object["key"]; exists {
-						return fmt.Errorf("%w: tls.key", errSecretField)
-					}
-				}
-			}
-			if err := rejectSecrets(child); err != nil {
+			if err := rejectSecretsIn(child, key); err != nil {
 				return err
 			}
 		}
 	case []any:
 		for _, child := range typed {
-			if err := rejectSecrets(child); err != nil {
+			if err := rejectSecretsIn(child, parent); err != nil {
 				return err
 			}
 		}

@@ -248,6 +248,19 @@ func TestMergeClientPeersAllowsSendRateBounds(t *testing.T) {
 	}
 }
 
+func TestTrimForRoleClientRejectsPeerPassword(t *testing.T) {
+	t.Parallel()
+	_, _, err := TrimForRole("client", map[string]any{
+		"peers": []any{map[string]any{
+			"peer_id":  "peer-a",
+			"password": "SECRET",
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected password field to reject request")
+	}
+}
+
 func TestTrimForRoleRejectsSecrets(t *testing.T) {
 	t.Parallel()
 	for name, content := range map[string]map[string]any{
