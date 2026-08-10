@@ -1,7 +1,7 @@
 # raypx2 Center 单节点在线配置设计
 
 **日期：** 2026-08-10  
-**状态：** 已批准  
+**状态：** 已批准（2026-08-10 评审修订：server patch-only、速率字段、deep merge、offline 双码、`applied`/脱敏/脏检查）  
 **实现计划：** [docs/superpowers/plans/2026-08-10-raypx2-center-node-config.md](../plans/2026-08-10-raypx2-center-node-config.md)  
 **范围仓库：** `/home/jack/src/pocketbase`（`apps/raypx2-center`）  
 **前置：** Agent 出站连接、Admin proxy、节点在线态已可用（见 `2026-08-08-raypx2-center-console-design.md` 与 raypx2 e2e 冒烟）
@@ -25,10 +25,13 @@
 ### 1.2 非目标
 
 - 中心 desired 草稿箱、确认后再 Apply、持续声明式调和
-- 本阶段改 Templates / Apply Jobs 产品行为（可共享 `configmerge` 演进）
+- 本阶段不改 Templates / Apply Jobs 的产品流程与 UI（创建 job、模板 CRUD 等）
 - 修改 raypx2 Admin 协议或语义
 - 经 Config 删除 client peer（省略 peer = 保留；删除留给后续/专用 API）
 - 多操作员 RBAC、密钥明文入库
+- Server 配置文档上的 `min/max_send_rate_kbps`（现网 `PATCH /api/v1/server/config` 不接受；速率热更新走其它 Admin 入口，本阶段不做）
+
+**共享 merge 说明：** 扩展 `configmerge` 白名单（例如 client peer `connection` 速率字段）会被 Apply 模板路径一并继承，属预期。Server 模板校验仍走仅 ACL 的 `MergeServerACL`（或等价约束），除非另开任务显式放开模板里的 `connection.compression.level`。
 
 ## 2. 架构与数据流
 
@@ -90,9 +93,9 @@ GET/PUT /api/center/nodes/{node_key}/config   (superuser)
 }
 ```
 
-- `live`：Admin 返回体，经展示脱敏（去掉已知密钥路径）  
-- `editor_draft`：从 `live` 抽出的**可写投影**（见 §4），供表单/JSON 初始绑定  
-- `role=unknown`：可返回 live（若有），但标明不可写
+- `live`：Admin 返回体，经展示脱敏（已知密钥路径替换为 `[REDACTED]`，复用/对齐 apply `redact` 规则）  
+- `editor_draft`：从 `live` 抽出的**可写投影**（见 §4），供表单/JSON 初始绑定；offline 时为空对象 `{}`  
+- `role=unknown`：可返回脱敏 `live`（若在线），`editor_draft` 为空；标明不可写（PUT 仍 `400 unsupported_node_role`）
 
 ### 3.2 `PUT /api/center/nodes/{node_key}/config`
 
@@ -106,17 +109,20 @@ GET/PUT /api/center/nodes/{node_key}/config   (superuser)
 }
 ```
 
-处理顺序：
+处理顺序（先本地校验，再打隧道）：
 
 1. 鉴权；节点存在；`role` ∈ `{client,server}`，否则 `400 unsupported_node_role`  
-2. `online != true` → `409 node_offline`  
-3. proxy GET actual；失败映射既有 proxy 错误码  
-4. `rejectSecrets(content)` → 失败 `400 secret_field_forbidden`  
-5. `patch, ignored = whitelistTrim(content, role)`  
-6. 若 patch 无可写变更 → `400 empty_config_update`  
-7. merge + 下发（§4）  
-8. 成功：写 `actual`/`pull` 与 `desired`/`manual_edit` revisions；`audit` `node.config.update`  
-9. 响应：
+2. `online != true` → `409 node_offline`（库内离线预检）  
+3. `rejectSecrets(content)` → 失败 `400 secret_field_forbidden`（**不**发起 proxy）  
+4. `patch, ignored = whitelistTrim(content, role)`  
+5. 若 patch 无可写变更 → `400 empty_config_update`（**不**发起 proxy）  
+6. proxy GET actual；失败映射既有 proxy 错误码（见下）  
+7. 写 `actual`/`pull` revision（脱敏 content）  
+8. merge + 下发（§4）：  
+   - **server：** `desired = MergeServerConfig(actual, patch)` 仅用于修订/响应；**`PATCH` body = `patch`（裁剪结果）**，不得发送 merge 后的整包 actual  
+   - **client：** `desired = MergeClientPeers(actual, patch)`；**`PUT` body = `desired` 整包**  
+9. 成功：写 `desired`/`manual_edit` revision；`audit` `node.config.update`  
+10. 响应：
 
 ```json
 {
@@ -127,8 +133,18 @@ GET/PUT /api/center/nodes/{node_key}/config   (superuser)
 }
 ```
 
-Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等价字段）；**不**写 `desired` revision。
+**`applied` 语义（固定）：** 成功下发后，对节点再做一次 GET，取其 `editor_draft` 投影（脱敏后）作为 `applied`，供 SPA 刷新 draft。避免把 Admin 原始响应、裸 patch、或未投影的整包 desired 混用。实现上也可在同一次 handler 内 GET→写→GET；客户端不得猜测其它含义。
 
+Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等价字段）；**不**写 `desired` revision。已写的 `actual/pull` 可保留（与 apply 对齐）或回滚——**本设计选择保留 pull**，因它反映写前真实快照。
+
+**`node_offline` 双状态码：**
+
+| 来源 | HTTP | code |
+|---|---|---|
+| 库内 `online=false` 预检 | 409 | `node_offline` |
+| 预检通过但 hub `ErrNodeOffline`（竞态掉线） | 503 | `node_offline` |
+
+SPA 对两者均按离线处理（禁用写、提示刷新）。
 ### 3.3 不新增
 
 - 不为表单单独开字段级 API；表单与 JSON 均提交 `content`  
@@ -136,9 +152,11 @@ Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等
 
 ## 4. 白名单、投影与 merge
 
-字段名以实现时 Admin JSON 为准；中心在读写边界做一次归一（例如 client peer 的 `id`/`peer_id`、`proto_peer`/`quic_peer`），`configmerge` 与 apply 共用同一归一+白名单表。若现有 `MergeClientPeers` 尚未允许 `connection.min_send_rate_kbps` / `max_send_rate_kbps`，本功能实现时扩展白名单并补测，避免表单可编、merge 却拒绝。
+字段名以实现时 Admin JSON 为准；中心在读写边界做一次归一（例如 client peer 的 `id`/`peer_id`、`proto_peer`/`quic_peer`），`configmerge` 与 apply 共用同一归一+白名单表。现有 `MergeClientPeers` 若尚未允许 `connection.min_send_rate_kbps` / `max_send_rate_kbps`，本功能实现时扩展白名单并补测。
 
 ### 4.1 Server
+
+以 raypx2 `TqParseServerConfigPatch` 为准（现网）。
 
 **可写下发白名单**
 
@@ -146,13 +164,17 @@ Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等
 |---|---|---|
 | `allow_targets` | 是 | string[]；多行文本 |
 | `deny_targets` | 是 | string[] |
-| `connection.compression.level` | 是 | 与 Admin PATCH 一致；可能伴随 `restart_required` |
-| `connection.max_send_rate_kbps` | 是 | 与 Admin PATCH 一致 |
-| `connection.min_send_rate_kbps` | 是（若 Admin 已支持） | 不支持则列入只读/ignored，不假装可写 |
+| `connection.compression.level` | 是 | 1–22；可能伴随 `restart_required` |
 
-**编辑投影：** GET 常含 `connection_config.desired|applied`、`pending_fields`、`restart_required` 等。`editor_draft` 只含可写扁平/嵌套字段（ACL + `connection.*` 取 desired）；只读态在 UI 旁路展示，不得进入 PUT `content` 的下发体。
+**明确不可写（trim → `ignored_fields`）：** `connection.min_send_rate_kbps`、`connection.max_send_rate_kbps`、以及一切 startup / 未知字段（如 `listen`、`tls`）。
 
-**merge / 下发：** `writeBody = whitelist(content)` → `PATCH /api/v1/server/config`。
+**编辑投影：** GET 常含 `connection_config.desired|applied`、`pending_fields`、`restart_required` 等。`editor_draft` 只含可写字段（ACL + `connection.compression.level`，level 取 desired）；`restart_required` / `pending_fields` 在 UI **旁路只读展示**，不得进入 PUT 下发体。
+
+**merge / 下发：**
+
+- `patch = whitelistTrim(content)`  
+- `desired = MergeServerConfig(actual, patch)` → 写入 revision / 推导展示  
+- **`PATCH /api/v1/server/config` 的 body = `patch` only**（不得发送 merge 后的整包）
 
 ### 4.2 Client
 
@@ -160,13 +182,21 @@ Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等
 
 **Peer 表单 MVP 字段：** 标识、远端地址、`socks_listen` / `http_listen`、`port_forwards`、连接数、`enabled`、`connection.min/max_send_rate_kbps`。`connection.encryption` / `compression` 等允许出现在 JSON 且在白名单内则可写；表单可后置。
 
-**禁止经 Config 删除 peer：** 表单不提供「保存后从节点删除 peer」；避免与 upsert-保留语义冲突。
+**`connection` deep merge（必须）：** upsert peer 时，对 `connection` 及其嵌套 `compression` 做深层合并，禁止用部分 `connection` 对象整键覆盖 actual，以免表单只改速率时抹掉 `encryption` / `compression` 等既有字段。补回归测试覆盖此行为。
+
+**禁止经 Config 删除 peer：** 表单不提供「保存后从节点删除 peer」；避免与 upsert-保留语义冲突。提交 `{peers:[]}` 视为无可写变更 → `400 empty_config_update`（不发起 PUT）。
 
 **merge / 下发：** `desired = MergeClientPeers(actual, {peers: ...})` → `PUT /api/v1/config` 整包 `desired`。
 
 ### 4.3 密钥拒绝
 
-扩展现有 `rejectSecrets`：拒绝 TLS 私钥材料、`admin` token 类字段、`center.enroll_secret*` 等。命中则整请求失败，不裁剪后继续写。
+扩展现有 `rejectSecrets`，至少拒绝：
+
+- TLS 私钥材料（含 `tls.key`）  
+- `admin` token 类字段（键名含 `token` / `password` / `secret` 的惯例路径）  
+- `enroll_secret`、`enroll_secret_file`、以及 `center.enroll_secret*`  
+
+命中则整请求 `400 secret_field_forbidden`，不裁剪后继续写。与 Agent 入站 `config_snapshot` 敏感键判定对齐。
 
 ### 4.4 `ignored_fields`
 
@@ -179,9 +209,11 @@ Admin 业务错误：携带 `admin_status` 与脱敏后的 `admin_body`（或等
 - 标题区：online 徽章、刷新、保存  
 - 模式切换：`表单 | JSON`，绑定同一 draft  
 - JSON → 表单：解析失败则禁止切换并报错  
-- 脏检查：相对上次成功加载/保存的 snapshot；未保存离开时页内确认（MVP）  
+- 脏检查：相对上次成功加载/保存的 `baseline`；未保存时切换 Node Detail tab 或返回列表须页内确认（MVP；`beforeunload` 可选）  
 - offline / `unknown`：只读；写按钮 disabled  
-- 保存成功：用 `applied`（或重新 GET）刷新 draft；展示 `ignored_fields`；刷新 revision 表  
+- 对 API `node_offline`（HTTP **409 或 503**）统一提示离线并禁用保存  
+- server 旁路只读展示 `restart_required` / `pending_fields`（来自 `live`，非 draft）  
+- 保存成功：用响应 `applied`（再 GET 的 editor_draft）刷新 draft 与 baseline；展示 `ignored_fields`；刷新 revision 表  
 - 保存失败：保留 draft，展示错误  
 
 Revision 历史表保留在编辑器下方。
@@ -199,37 +231,41 @@ Revision 历史表保留在编辑器下方。
 | 未授权 | 401/403 | 现有 |
 | 节点不存在 | 404 | `node_not_found` |
 | 角色不支持 | 400 | `unsupported_node_role` |
-| 离线写 | 409 | `node_offline` |
+| 库内离线预检 | 409 | `node_offline` |
+| hub 竞态离线 | 503 | `node_offline` |
 | 密钥字段 | 400 | `secret_field_forbidden` |
 | 无有效变更 | 400 | `empty_config_update` |
-| 隧道/proxy | 现有映射 | `node_offline` / `tunnel_timeout` / `admin_unreachable` / … |
+| 其它隧道/proxy | 现有映射 | `tunnel_timeout` / `admin_unreachable` / … |
 | Admin 拒绝 | 包装/透传 | 含 `admin_status` |
 
-审计 `node.config.update`：记录 actor、node、role、content_hash、ignored_fields 摘要、admin_status；不存完整配置明文与密钥。
+审计 `node.config.update` 的 `request_summary` **固定键**：
 
-修订：下发成功才写 `desired/manual_edit`；拉取 actual 的 `pull` 在写路径中于下发前落库（与 apply runner 模式对齐）。
+- `node_key`、`role`、`content_hash`、`ignored_fields`（字符串数组，可截断）、`admin_status`  
+- **禁止**写入完整 `content` / `applied` / 密钥明文  
+
+修订：下发成功才写 `desired/manual_edit`；`actual/pull` 在写路径中于下发前落库（脱敏）；Admin 失败时保留已写入的 pull。
 
 ## 7. 测试策略
 
 ### 7.1 中心 Go
 
-- 白名单裁剪、密钥拒绝、empty update  
-- server patch 子集；client merge 保留未提及 peer  
-- handler：offline 409、角色错误；proxy mock 成功后 revision + audit  
+- 白名单裁剪、密钥拒绝（含 enroll_secret）、empty update（含 `{peers:[]}`）  
+- server：**PATCH body = patch only**；client：merge 保留未提及 peer；**connection deep merge**  
+- handler：409 与 503 `node_offline`；role 错误；live redact；`applied` 为再 GET 投影；audit summary 键约束  
 
 ### 7.2 SPA
 
 - 表单 ↔ JSON 同步；非法 JSON 不可切表单  
-- offline 禁用保存  
-- Ops 不再含 ACL 编辑；Config 含 ACL/peers 表单  
-- 成功保存展示 ignored_fields 并出现新 revision  
+- 脏离开确认；offline / 409 / 503 禁用或提示  
+- Ops 不再含 ACL 编辑；Config 含 ACL/peers 表单与 restart 旁路只读  
+- 成功保存展示 ignored_fields 并用 `applied` 刷新  
 
 ### 7.3 手工冒烟
 
-1. 在线 server 改 ACL → 节点生效 → revision 可见  
-2. 在线 client 改某一 peer → 其他 peer 仍在  
-3. JSON 含密钥 → 400  
-4. 离线保存 → 409  
+1. 在线 server 改 ACL → 节点生效 → revision 可见；夹带非白名单字段仅 ignored  
+2. 在线 client 只改 rate → 其他 peer 与 encryption 仍在  
+3. JSON 含密钥 / enroll_secret → 400  
+4. 离线或停 Agent → 409 或 503  
 
 ## 8. 成功标准
 
