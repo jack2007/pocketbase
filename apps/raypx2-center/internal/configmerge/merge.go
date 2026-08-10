@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 )
 
@@ -38,8 +37,6 @@ var clientWritablePaths = []string{
 	"peers[].connection.encryption",
 	"peers[].connection.compression.mode",
 	"peers[].connection.compression.level",
-	"peers[].connection.min_send_rate_kbps",
-	"peers[].connection.max_send_rate_kbps",
 }
 
 // WritablePaths returns the stable list of editable config paths for a role.
@@ -465,10 +462,7 @@ func trimPeerConnection(connection map[string]any, ignored *[]string) (map[strin
 				out["compression"] = compPatch
 			}
 		case "min_send_rate_kbps", "max_send_rate_kbps":
-			if err := nonNegativeNumber(connectionKey, connectionValue); err != nil {
-				return nil, err
-			}
-			out[connectionKey] = connectionValue
+			*ignored = append(*ignored, connectionKey)
 		default:
 			*ignored = append(*ignored, connectionKey)
 		}
@@ -541,10 +535,6 @@ func validatePeer(peer map[string]any) error {
 							return fmt.Errorf("connection.compression field %q is not allowed", compressionKey)
 						}
 					}
-				case "min_send_rate_kbps", "max_send_rate_kbps":
-					if err := nonNegativeNumber(connectionKey, connectionValue); err != nil {
-						return err
-					}
 				default:
 					return fmt.Errorf("connection field %q is not allowed", connectionKey)
 				}
@@ -566,20 +556,6 @@ func validatePeer(peer map[string]any) error {
 				}
 			}
 		}
-	}
-	return nil
-}
-
-func nonNegativeNumber(name string, value any) error {
-	number, ok := value.(float64)
-	if !ok {
-		return fmt.Errorf("%s must be a number", name)
-	}
-	if number < 0 || math.IsNaN(number) || math.IsInf(number, 0) {
-		return fmt.Errorf("%s must be >= 0", name)
-	}
-	if math.Trunc(number) != number {
-		return fmt.Errorf("%s must be an integer", name)
 	}
 	return nil
 }

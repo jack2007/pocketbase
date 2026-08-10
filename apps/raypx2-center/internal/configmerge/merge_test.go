@@ -139,13 +139,14 @@ func TestTrimForRoleServerKeepsACLAndCompressionIgnoresRest(t *testing.T) {
 	}
 }
 
-func TestTrimForRoleClientPeersPreservesRateFields(t *testing.T) {
+func TestTrimForRoleClientPeersIgnoresStartupOnlyRateFields(t *testing.T) {
 	t.Parallel()
 	patch, ignored, err := TrimForRole("client", map[string]any{
 		"peers": []any{map[string]any{
 			"id":         "peer-a",
 			"proto_peer": "10.0.0.2:4433",
 			"connection": map[string]any{
+				"encryption":         "enabled",
 				"min_send_rate_kbps": float64(1000),
 				"max_send_rate_kbps": float64(50000),
 			},
@@ -161,11 +162,26 @@ func TestTrimForRoleClientPeersPreservesRateFields(t *testing.T) {
 		t.Fatalf("normalize failed: %#v", peer)
 	}
 	conn := peer["connection"].(map[string]any)
-	if conn["min_send_rate_kbps"] != float64(1000) {
-		t.Fatalf("rates missing: %#v", conn)
+	if conn["encryption"] != "enabled" {
+		t.Fatalf("writable connection field missing: %#v", conn)
 	}
-	if !strings.Contains(strings.Join(ignored, ","), "tls") {
-		t.Fatalf("ignored=%v", ignored)
+	if _, ok := conn["min_send_rate_kbps"]; ok {
+		t.Fatalf("startup-only rate must be ignored: %#v", conn)
+	}
+	joined := strings.Join(ignored, ",")
+	for _, want := range []string{"tls", "min_send_rate_kbps", "max_send_rate_kbps"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("ignored=%v want %q", ignored, want)
+		}
+	}
+}
+
+func TestWritablePathsClientExcludesStartupOnlyRateFields(t *testing.T) {
+	t.Parallel()
+	joined := strings.Join(WritablePaths("client"), ",")
+	if strings.Contains(joined, "min_send_rate_kbps") ||
+		strings.Contains(joined, "max_send_rate_kbps") {
+		t.Fatalf("writable paths contain startup-only rates: %s", joined)
 	}
 }
 
@@ -252,9 +268,8 @@ func TestEditorDraftClientProjectsOnlyWritablePeerFields(t *testing.T) {
 		"quic_peer": "host:443",
 		"enabled":   true,
 		"connection": map[string]any{
-			"encryption":         "enabled",
-			"compression":        map[string]any{"mode": "auto", "level": float64(3)},
-			"min_send_rate_kbps": float64(1000),
+			"encryption":  "enabled",
+			"compression": map[string]any{"mode": "auto", "level": float64(3)},
 		},
 		"port_forwards": []any{map[string]any{
 			"listen": ":8080", "target": "127.0.0.1:80",
@@ -265,12 +280,12 @@ func TestEditorDraftClientProjectsOnlyWritablePeerFields(t *testing.T) {
 	}
 }
 
-func TestMergeClientPeersAllowsSendRateBounds(t *testing.T) {
+func TestMergeClientPeersRejectsStartupOnlySendRates(t *testing.T) {
 	t.Parallel()
 	actual := map[string]any{"peers": []any{
 		map[string]any{"peer_id": "peer-a", "quic_peer": "old:443"},
 	}}
-	merged, err := MergeClientPeers(actual, map[string]any{
+	_, err := MergeClientPeers(actual, map[string]any{
 		"peers": []any{map[string]any{
 			"peer_id": "peer-a",
 			"connection": map[string]any{
@@ -279,13 +294,8 @@ func TestMergeClientPeersAllowsSendRateBounds(t *testing.T) {
 			},
 		}},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	peer := merged["peers"].([]any)[0].(map[string]any)
-	conn := peer["connection"].(map[string]any)
-	if conn["max_send_rate_kbps"] != float64(2000) {
-		t.Fatalf("%#v", conn)
+	if err == nil {
+		t.Fatal("expected startup-only send rates to be rejected")
 	}
 }
 
@@ -341,7 +351,7 @@ func TestTrimForRoleRejectsSecrets(t *testing.T) {
 	}
 }
 
-func TestMergeClientPeersPartialConnectionPreservesEncryption(t *testing.T) {
+func TestMergeClientPeersPartialConnectionPreservesOtherConnectionFields(t *testing.T) {
 	t.Parallel()
 	actual := map[string]any{"peers": []any{
 		map[string]any{
@@ -358,8 +368,7 @@ func TestMergeClientPeersPartialConnectionPreservesEncryption(t *testing.T) {
 		"peers": []any{map[string]any{
 			"peer_id": "peer-a",
 			"connection": map[string]any{
-				"min_send_rate_kbps": float64(1000),
-				"max_send_rate_kbps": float64(2000),
+				"compression": map[string]any{"level": float64(5)},
 			},
 		}},
 	})
@@ -371,11 +380,11 @@ func TestMergeClientPeersPartialConnectionPreservesEncryption(t *testing.T) {
 		t.Fatalf("encryption wiped: %#v", conn)
 	}
 	comp := conn["compression"].(map[string]any)
-	if comp["mode"] != "disabled" || comp["level"] != float64(3) {
+	if comp["mode"] != "disabled" || comp["level"] != float64(5) {
 		t.Fatalf("compression wiped: %#v", conn)
 	}
-	if conn["max_send_rate_kbps"] != float64(2000) || conn["min_send_rate_kbps"] != float64(1000) {
-		t.Fatalf("rates missing: %#v", conn)
+	if conn["max_send_rate_kbps"] != float64(0) {
+		t.Fatalf("actual startup-only rate was not preserved: %#v", conn)
 	}
 }
 
@@ -408,6 +417,9 @@ func TestTrimForRoleClientTrimsNonWhitelistPeerFields(t *testing.T) {
 	if _, ok := conn["legacy_field"]; ok {
 		t.Fatalf("connection legacy_field must be trimmed: %#v", conn)
 	}
+	if _, ok := conn["min_send_rate_kbps"]; ok {
+		t.Fatalf("startup-only rate must be trimmed: %#v", conn)
+	}
 	comp := conn["compression"].(map[string]any)
 	if _, ok := comp["unknown"]; ok {
 		t.Fatalf("compression unknown must be trimmed: %#v", comp)
@@ -417,7 +429,7 @@ func TestTrimForRoleClientTrimsNonWhitelistPeerFields(t *testing.T) {
 		t.Fatalf("port_forward extra must be trimmed: %#v", forward)
 	}
 	joined := strings.Join(ignored, ",")
-	for _, want := range []string{"status", "legacy_field", "unknown", "extra"} {
+	for _, want := range []string{"status", "min_send_rate_kbps", "legacy_field", "unknown", "extra"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("ignored=%v want %q", ignored, want)
 		}
@@ -445,22 +457,30 @@ func TestTrimForRoleClientKeepsEmptyPortForwards(t *testing.T) {
 	}
 }
 
-func TestTrimForRoleClientRejectsFractionalSendRate(t *testing.T) {
+func TestTrimForRoleClientIgnoresInvalidStartupOnlySendRate(t *testing.T) {
 	t.Parallel()
-	_, _, err := TrimForRole("client", map[string]any{
+	patch, ignored, err := TrimForRole("client", map[string]any{
 		"peers": []any{map[string]any{
 			"peer_id": "peer-a",
 			"connection": map[string]any{
+				"encryption":         "enabled",
 				"min_send_rate_kbps": float64(1.5),
 			},
 		}},
 	})
-	if err == nil {
-		t.Fatal("expected fractional min_send_rate_kbps to be rejected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := patch["peers"].([]any)[0].(map[string]any)
+	if _, ok := peer["connection"].(map[string]any)["min_send_rate_kbps"]; ok {
+		t.Fatalf("startup-only rate must be ignored: %#v", peer)
+	}
+	if !strings.Contains(strings.Join(ignored, ","), "min_send_rate_kbps") {
+		t.Fatalf("ignored=%v", ignored)
 	}
 }
 
-func TestMergeClientPeersRejectsFractionalSendRate(t *testing.T) {
+func TestMergeClientPeersRejectsStartupOnlySendRate(t *testing.T) {
 	t.Parallel()
 	actual := map[string]any{"peers": []any{}}
 	_, err := MergeClientPeers(actual, map[string]any{

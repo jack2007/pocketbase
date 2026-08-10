@@ -235,7 +235,7 @@ func TestPutNodeConfigAuditsSuccessfulWriteWhenAppliedGetFails(t *testing.T) {
 	}
 }
 
-func TestPutNodeConfigClientNormalizesAdminPeersBeforeMerge(t *testing.T) {
+func TestPutNodeConfigClientIgnoresStartupOnlyRatesAndMergesWritableFields(t *testing.T) {
 	app, node, auth := newCenterTestApp(t)
 	setConfigNode(t, app, node, "client", true)
 	actual := map[string]any{
@@ -261,7 +261,8 @@ func TestPutNodeConfigClientNormalizesAdminPeersBeforeMerge(t *testing.T) {
 		"/api/center/nodes/"+node.GetString("node_key")+"/config",
 		node.GetString("node_key"), map[string]any{
 			"content": map[string]any{"peers": []any{map[string]any{
-				"peer_id": "peer-a",
+				"peer_id":      "peer-a",
+				"socks_listen": "127.0.0.1:1081",
 				"connection": map[string]any{
 					"min_send_rate_kbps": float64(1000),
 					"max_send_rate_kbps": float64(2000),
@@ -272,8 +273,10 @@ func TestPutNodeConfigClientNormalizesAdminPeersBeforeMerge(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
-	if !bytes.Contains(response.Body.Bytes(), []byte(`"ignored_fields":[]`)) {
-		t.Fatalf("ignored_fields must be an array: %s", response.Body.String())
+	for _, ignored := range []string{"min_send_rate_kbps", "max_send_rate_kbps"} {
+		if !bytes.Contains(response.Body.Bytes(), []byte(ignored)) {
+			t.Fatalf("ignored_fields missing %q: %s", ignored, response.Body.String())
+		}
 	}
 	if len(hub.puts) != 1 || hub.puts[0].Method != http.MethodPut ||
 		hub.puts[0].Path != "/api/v1/config" {
@@ -289,7 +292,8 @@ func TestPutNodeConfigClientNormalizesAdminPeersBeforeMerge(t *testing.T) {
 	}
 	connection := peers[0].(map[string]any)["connection"].(map[string]any)
 	if connection["encryption"] != "enabled" ||
-		connection["max_send_rate_kbps"] != float64(2000) {
+		connection["max_send_rate_kbps"] != float64(0) ||
+		peers[0].(map[string]any)["socks_listen"] != "127.0.0.1:1081" {
 		t.Fatalf("peer-a connection = %#v", connection)
 	}
 	var result struct {

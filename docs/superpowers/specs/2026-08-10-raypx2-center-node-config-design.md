@@ -29,9 +29,9 @@
 - 修改 raypx2 Admin 协议或语义
 - 经 Config 删除 client peer（省略 peer = 保留；删除留给后续/专用 API）
 - 多操作员 RBAC、密钥明文入库
-- Server 配置文档上的 `min/max_send_rate_kbps`（现网 `PATCH /api/v1/server/config` 不接受；速率热更新走其它 Admin 入口，本阶段不做）
+- Server 和 client peer 配置文档上的 `min/max_send_rate_kbps`（Admin 启动后不接受修改；本阶段不做）
 
-**共享 merge 说明：** 扩展 `configmerge` 白名单（例如 client peer `connection` 速率字段）会被 Apply 模板路径一并继承，属预期。Server 模板校验仍走仅 ACL 的 `MergeServerACL`（或等价约束），除非另开任务显式放开模板里的 `connection.compression.level`。
+**共享 merge 说明：** client peer 速率字段不在 `configmerge` 白名单中：Config trim 为 ignored，Apply/template merge 直接拒绝。Server 模板校验仍走仅 ACL 的 `MergeServerACL`（或等价约束），除非另开任务显式放开模板里的 `connection.compression.level`。
 
 ## 2. 架构与数据流
 
@@ -152,7 +152,7 @@ SPA 对两者均按离线处理（禁用写、提示刷新）。
 
 ## 4. 白名单、投影与 merge
 
-字段名以实现时 Admin JSON 为准；中心在读写边界做一次归一（例如 client peer 的 `id`/`peer_id`、`proto_peer`/`quic_peer`），`configmerge` 与 apply 共用同一归一+白名单表。现有 `MergeClientPeers` 若尚未允许 `connection.min_send_rate_kbps` / `max_send_rate_kbps`，本功能实现时扩展白名单并补测。
+字段名以实现时 Admin JSON 为准；中心在读写边界做一次归一（例如 client peer 的 `id`/`peer_id`、`proto_peer`/`quic_peer`），`configmerge` 与 apply 共用同一归一+白名单表。`connection.min_send_rate_kbps` / `max_send_rate_kbps` 是 Admin startup-only 字段，不进入可写投影或 merge 白名单。
 
 ### 4.1 Server
 
@@ -180,9 +180,9 @@ SPA 对两者均按离线处理（禁用写、提示刷新）。
 
 **可写范围：** 仅通过白名单改 `peers`（upsert）。未出现在提交 peers 列表中的既有 peer **保留**。
 
-**Peer 表单 MVP 字段：** 标识、远端地址、`socks_listen` / `http_listen`、`port_forwards`、连接数、`enabled`、`connection.min/max_send_rate_kbps`。`connection.encryption` / `compression` 等允许出现在 JSON 且在白名单内则可写；表单可后置。
+**Peer 表单 MVP 字段：** 标识、远端地址、`socks_listen` / `http_listen`、`port_forwards`、连接数、`enabled`。`connection.encryption` / `compression` 等允许出现在 JSON 且在白名单内则可写；表单可后置。`connection.min/max_send_rate_kbps` 为 startup-only，提交时进入 `ignored_fields`。
 
-**`connection` deep merge（必须）：** upsert peer 时，对 `connection` 及其嵌套 `compression` 做深层合并，禁止用部分 `connection` 对象整键覆盖 actual，以免表单只改速率时抹掉 `encryption` / `compression` 等既有字段。补回归测试覆盖此行为。
+**`connection` deep merge（必须）：** upsert peer 时，对 `connection` 及其嵌套 `compression` 做深层合并，禁止用部分 `connection` 对象整键覆盖 actual，以免只改某个 writable connection 字段时抹掉 `encryption` / `compression` 等既有字段。补回归测试覆盖此行为。
 
 **禁止经 Config 删除 peer：** 表单不提供「保存后从节点删除 peer」；避免与 upsert-保留语义冲突。提交 `{peers:[]}` 视为无可写变更 → `400 empty_config_update`（不发起 PUT）。
 
@@ -263,7 +263,7 @@ Revision 历史表保留在编辑器下方。
 ### 7.3 手工冒烟
 
 1. 在线 server 改 ACL → 节点生效 → revision 可见；夹带非白名单字段仅 ignored  
-2. 在线 client 只改 rate → 其他 peer 与 encryption 仍在  
+2. 在线 client 只改一个 writable field（如 `socks_listen` 或 `enabled`）→ 其他 peer 与 connection 配置仍在；夹带 rate 时仅 ignored  
 3. JSON 含密钥 / enroll_secret → 400  
 4. 离线或停 Agent → 409 或 503  
 

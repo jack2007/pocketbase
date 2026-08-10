@@ -18,12 +18,13 @@
 - Server Admin PATCH **当前**仅接受：`allow_targets`、`deny_targets`、`connection.compression.level`（以 raypx2 `TqParseServerConfigPatch` 为准）。**`min/max_send_rate_kbps` 必须 trim 进 ignored，不得 PATCH。**
 - **Server `PATCH` body = `TrimForRole` 的 patch only**；`MergeServerConfig` 只用于 revision / 内部 desired，不得把 merge 整包发给 Admin。
 - **Client `PUT` body = `MergeClientPeers` 后的整包 desired**；peer `connection`（及嵌套 `compression`）必须 deep merge。
+- Client peer `connection.min/max_send_rate_kbps` 是 Admin startup-only：Config trim 为 ignored，Apply/template merge 拒绝。
 - Client：未提交的既有 peer **保留**；本阶段不经 Config 删除 peer；`{peers:[]}` → `empty_config_update`。
 - `node_offline`：库内预检 **409**；hub `ErrNodeOffline` **503**；SPA 两者同等处理。
 - PUT 成功响应的 `applied` = 下发后再 GET 的 `editor_draft`（脱敏）。
 - 本地 Admin Bearer / enroll 明文永不进 revision 正文或审计全文；`rejectSecrets` 含 `enroll_secret*`。
 - SPA 入口 `/app/`；操作员仅为 superuser。
-- 扩展 client merge 白名单会被 Apply 继承（预期）；server 模板仍用 `MergeServerACL` 仅 ACL，除非另开任务。
+- Client merge 白名单会被 Apply 继承；startup-only rate 不在白名单内。Server 模板仍用 `MergeServerACL` 仅 ACL，除非另开任务。
 
 ## File Structure
 
@@ -44,6 +45,8 @@
 
 ### Task 1: 扩展 `configmerge`（裁剪、投影、速率字段）
 
+> 2026-08-10 smoke 修订：下方早期 rate 测试示例由全局约束取代；client rate 必须 Trim ignored / Merge reject。
+
 **Files:**
 - Modify: `apps/raypx2-center/internal/configmerge/merge.go`
 - Modify: `apps/raypx2-center/internal/configmerge/merge_test.go`
@@ -54,7 +57,7 @@
   - `func TrimForRole(role string, content map[string]any) (patch map[string]any, ignored []string, err error)`
   - `func EditorDraft(role string, live map[string]any) (map[string]any, error)`
   - `func NormalizeClientPeers(content map[string]any) (map[string]any, error)` — `id`→`peer_id`，`proto_peer`→`quic_peer`，`proto_connections`→`quic_connections`
-  - 扩展 peer `connection` 白名单：允许 `min_send_rate_kbps`、`max_send_rate_kbps`（非负整数）
+  - peer `connection.min/max_send_rate_kbps` 不进入白名单（Trim ignored；Merge reject）
   - **`MergeClientPeers`：对 `connection` / `compression` deep merge**（部分更新不得整键覆盖）
   - 扩展 server：新增 `MergeServerConfig` 允许 `connection.compression.level`；`MergeServerACL` 保持仅 ACL（Apply 继续用）
   - 扩展 `rejectSecrets`：拒绝 `enroll_secret`、`enroll_secret_file`、以及键路径含 `enroll_secret` 的对象
@@ -282,11 +285,11 @@ Expected: FAIL（`TrimForRole` / `EditorDraft` / `Redact` 未定义，或 shallo
 
 在 `merge.go`：
 
-1. 扩展 `validatePeer`：`connection` 允许 `encryption`、`compression`、`min_send_rate_kbps`、`max_send_rate_kbps`；数值须为 JSON number 且 ≥ 0。
+1. `validatePeer` 的 `connection` 仅允许运行时可写字段；`min/max_send_rate_kbps` 作为 startup-only 字段拒绝。
 2. **Deep merge：** upsert 时若 key 为 `connection`（或嵌套 `compression`），递归合并 map，而非 `peer[key]=value` 整键覆盖。
 3. 新增 `MergeServerConfig(actual, body)`，允许 `allow_targets`、`deny_targets`、`connection.compression.level`；`MergeServerACL` 保持仅 ACL，供 Apply 使用。
 4. 实现 `NormalizeClientPeers`：peers 数组做键别名映射。
-5. 实现 `TrimForRole`：先 `rejectSecrets`；再按角色提取白名单；server 将 `connection.max/min_send_rate_kbps` 记入 ignored；client 顶层只保留归一后的 `peers`；`{peers:[]}` 视为空 patch。
+5. 实现 `TrimForRole`：先 `rejectSecrets`；再按角色提取白名单；server 与 client peer 均将 `connection.max/min_send_rate_kbps` 记入 ignored；client 顶层只保留归一后的 `peers`；`{peers:[]}` 视为空 patch。
 6. 扩展 `rejectSecrets`：显式拒绝 `enroll_secret`、`enroll_secret_file`；键名归一后含 `enroll_secret` 的也拒绝。
 7. 实现 `EditorDraft`：server ACL + desired compression level；client peers Normalize。
 8. 实现可导出 `Redact`（或 `configmerge.RedactForStorage`），规则对齐 apply。
@@ -371,7 +374,7 @@ func (h *configHub) RequestProxy(ctx context.Context, nodeKey string, req agenth
 1. `PUT` 库内 offline → `409` + `node_offline`（不调用 hub）
 2. `PUT` 库内 online 但 hub 返回 `ErrNodeOffline` → `503` + `node_offline`
 3. `PUT` server 成功：stub GET 返回含 `listen` 的 live；body 含 `allow_targets` + 多余 `listen` + `connection.max_send_rate_kbps`；断言 hub **PATCH** path 正确，且 **body 仅含白名单字段**（无 `listen`、无 rate、无整包 startup）；响应含 `ignored_fields`；第二次 GET stub 用于 `applied`；DB 有 `desired/manual_edit`；audit `node.config.update` 的 summary 含 `content_hash` / `ignored_fields` / `admin_status` / `role`，**不含**完整 content
-4. `PUT` client：GET 含两个 peers（peer-a 带 encryption）；content 只改 peer-a rates；断言 PUT body 仍含 peer-b，且 peer-a `encryption` 仍在
+4. `PUT` client：GET 含两个 peers（peer-a 带 encryption）；content 改 peer-a writable field 并夹带 rates；断言 rates ignored、PUT body 仍含 peer-b，且 peer-a `encryption` 仍在
 5. `PUT` 含 `tls.key` 或 `enroll_secret` → `400 secret_field_forbidden`（不调用 hub）
 6. `PUT` 裁剪后空或 `{peers:[]}` → `400 empty_config_update`
 7. `GET` online：`live` 已 redact（`admin_token`/`tls.key` → `[REDACTED]`）；含 `editor_draft`、`writable_paths`
@@ -652,7 +655,7 @@ EOF
 
 - [ ] **Step 1:** 启动中心与在线节点（沿用既有 e2e 拓扑或本机 client）
 - [ ] **Step 2:** Server Config 改 ACL → Save → Admin GET 确认 → revision `manual_edit`；JSON 夹带 `listen` 时出现 ignored 提示且节点未写入 `listen`
-- [ ] **Step 3:** Client 只改某一 peer 的 rate → 其他 peer 仍在，且该 peer 的 encryption/compression 未被抹掉
+- [ ] **Step 3:** Client 只改某一 peer 的 writable field（如 `socks_listen` 或 `enabled`）→ 其他 peer 与 connection 配置仍在；夹带 rate 时报告 ignored
 - [ ] **Step 4:** JSON 含 `tls.key` 或 `enroll_secret` → `400 secret_field_forbidden`
 - [ ] **Step 5:** 库内标记 offline 或停 Agent → Save → `409` 或 `503` + `node_offline`
 - [ ] **Step 6:** 将上述 5 步结果追加到 `apps/raypx2-center/README.md`「Node configuration」小节下的短清单（或独立 smoke 笔记），并 commit：
