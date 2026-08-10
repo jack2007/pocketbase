@@ -57,13 +57,21 @@ describe("NodeDetail", () => {
     vi.unstubAllGlobals();
   });
 
-  it("disables write controls when the node is offline", async () => {
+  it("shows the offline write notice on Ops", () => {
     render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
 
-    expect(await screen.findByRole("button", { name: "Save ACL" })).toBeDisabled();
     expect(screen.getByText("Writes are disabled while this node is offline.")).toBeInTheDocument();
+  });
+
+  it("does not show Server ACL editor on Ops tab", async () => {
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+
+    expect(screen.queryByRole("button", { name: /save acl/i })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/allow targets/i)).not.toBeInTheDocument();
   });
 
   it("loads role-specific operations through the node proxy", async () => {
@@ -72,10 +80,11 @@ describe("NodeDetail", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
 
-    await screen.findByText("Server ACL");
-    expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/health");
-    expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/config");
-    expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/connections");
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/health");
+      expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/connections");
+    });
+    expect(api.proxyNode).not.toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/config");
   });
 
   it("shows health status from the node record on Overview", () => {

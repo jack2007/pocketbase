@@ -381,9 +381,6 @@ function NodeOps({ node }: { node: CenterNode }) {
   const [health, setHealth] = useState<unknown>();
   const [peers, setPeers] = useState<JsonObject[]>([]);
   const [connections, setConnections] = useState<JsonObject[]>([]);
-  const [serverConfig, setServerConfig] = useState<JsonObject>({});
-  const [allowTargets, setAllowTargets] = useState("");
-  const [denyTargets, setDenyTargets] = useState("");
   const [loading, setLoading] = useState(true);
   const [writing, setWriting] = useState(false);
   const [error, setError] = useState("");
@@ -393,15 +390,11 @@ function NodeOps({ node }: { node: CenterNode }) {
     setError("");
     try {
       if (node.role === "server") {
-        const [healthResult, configResult, connectionsResult] = await Promise.all([
+        const [healthResult, connectionsResult] = await Promise.all([
           proxyNode(node.node_key, "GET", "/api/v1/health"),
-          proxyNode<JsonObject>(node.node_key, "GET", "/api/v1/server/config"),
           proxyNode(node.node_key, "GET", "/api/v1/server/connections"),
         ]);
         setHealth(healthResult);
-        setServerConfig(configResult);
-        setAllowTargets(readTargets(configResult, "allow_targets").join("\n"));
-        setDenyTargets(readTargets(configResult, "deny_targets").join("\n"));
         setConnections(itemsFrom(connectionsResult, "connections"));
       } else if (node.role === "client") {
         const [healthResult, peersResult] = await Promise.all([
@@ -452,23 +445,6 @@ function NodeOps({ node }: { node: CenterNode }) {
     }
   }
 
-  async function saveAcl() {
-    if (!node.online) return;
-    setWriting(true);
-    setError("");
-    try {
-      const updated = await proxyNode<JsonObject>(node.node_key, "PATCH", "/api/v1/server/config", {
-        allow_targets: lines(allowTargets),
-        deny_targets: lines(denyTargets),
-      });
-      setServerConfig(updated);
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setWriting(false);
-    }
-  }
-
   return (
     <div className="ops-stack">
       {!node.online && <div className="offline-notice">Writes are disabled while this node is offline.</div>}
@@ -512,23 +488,7 @@ function NodeOps({ node }: { node: CenterNode }) {
       )}
 
       {node.role === "server" && (
-        <>
-          <div className="panel ops-panel">
-            <PanelHeading title="Server ACL" />
-            <div className="acl-grid">
-              <label>Allow targets<textarea value={allowTargets} onChange={(event) => setAllowTargets(event.target.value)} /></label>
-              <label>Deny targets<textarea value={denyTargets} onChange={(event) => setDenyTargets(event.target.value)} /></label>
-            </div>
-            <div className="acl-actions">
-              <span className="muted">One CIDR or target per line.</span>
-              <button className="button" disabled={!node.online || writing || loading} onClick={() => void saveAcl()}>
-                {writing ? "Saving…" : "Save ACL"}
-              </button>
-            </div>
-            {Object.keys(serverConfig).length > 0 && <details><summary>Raw server config</summary><JsonView value={serverConfig} /></details>}
-          </div>
-          <ConnectionsTable connections={connections} loading={loading} />
-        </>
+        <ConnectionsTable connections={connections} loading={loading} />
       )}
     </div>
   );
@@ -703,13 +663,6 @@ function isObject(value: unknown): value is JsonObject {
 function itemId(item: JsonObject): string {
   const value = item.id ?? item.peer_id ?? item.connection_id;
   return typeof value === "string" ? value : "";
-}
-
-function readTargets(config: JsonObject, key: string): string[] {
-  const direct = config[key];
-  if (Array.isArray(direct)) return direct.filter((value): value is string => typeof value === "string");
-  const acl = isObject(config.acl) ? config.acl[key] : undefined;
-  return Array.isArray(acl) ? acl.filter((value): value is string => typeof value === "string") : [];
 }
 
 function lines(value: string): string[] {

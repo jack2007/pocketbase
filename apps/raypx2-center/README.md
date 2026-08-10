@@ -28,6 +28,13 @@ npm run build
 
 Commit the updated `dist` files together with the source changes.
 
+## Node configuration
+
+Open a node → **Config**. Edit via **Form** or **JSON**, then Save.
+The center whitelists writable Admin fields, writes the node over the
+agent tunnel, and stores a `manual_edit` revision. Offline nodes are
+read-only. Peer deletion is not supported on this page.
+
 ## Production HTTPS and WSS
 
 Do not expose the center's plain HTTP listener directly. Bind it to loopback
