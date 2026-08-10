@@ -135,6 +135,14 @@ function NodeConfig({
     setMode("form");
   }
 
+  function commitApplied(result: { applied: JsonObject; ignored_fields?: string[] }) {
+    const applied = result.applied;
+    setDraft(applied);
+    setJsonText(JSON.stringify(applied, null, 2));
+    setBaseline(stableStringify(applied));
+    setIgnored(result.ignored_fields || []);
+  }
+
   async function save() {
     let content = draft;
     if (mode === "json") {
@@ -152,16 +160,20 @@ function NodeConfig({
     setIgnored([]);
     try {
       const result = await putNodeConfig(node.node_key, content);
-      const response = await getNodeConfig(node.node_key);
-      const nextDraft = response.editor_draft || {};
-      setDraft(nextDraft);
-      setJsonText(JSON.stringify(nextDraft, null, 2));
-      setBaseline(stableStringify(nextDraft));
-      setRole(response.role);
-      setOnline(response.online);
-      setLiveMeta(connectionMetadata(response));
-      setRevisions(response.recent_revisions || []);
-      setIgnored(result.ignored_fields || []);
+      commitApplied(result);
+      try {
+        const response = await getNodeConfig(node.node_key);
+        const nextDraft = response.editor_draft || {};
+        setDraft(nextDraft);
+        setJsonText(JSON.stringify(nextDraft, null, 2));
+        setBaseline(stableStringify(nextDraft));
+        setRole(response.role);
+        setOnline(response.online);
+        setLiveMeta(connectionMetadata(response));
+        setRevisions(response.recent_revisions || []);
+      } catch (refreshCause) {
+        setError(refreshWarningMessage(refreshCause));
+      }
     } catch (cause) {
       if (isNodeOfflineError(cause)) {
         setOnline(false);
@@ -721,6 +733,11 @@ function display(value: unknown): string {
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : "Operation failed.";
+}
+
+function refreshWarningMessage(cause: unknown): string {
+  const detail = cause instanceof Error ? cause.message : "Unknown error";
+  return `Configuration saved, but metadata could not be refreshed (${detail}). Use Refresh to reload.`;
 }
 
 function formatDate(value?: string) {

@@ -90,6 +90,30 @@ describe("NodeDetail", () => {
     expect(screen.getByText("healthy")).toBeInTheDocument();
   });
 
+  it("keeps applied config and shows refresh warning when post-save GET fails", async () => {
+    vi.mocked(api.putNodeConfig).mockResolvedValue({
+      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+      ignored_fields: ["listen"],
+      revision_id: "rev1",
+      admin_status: 200,
+    });
+    vi.mocked(api.getNodeConfig)
+      .mockResolvedValueOnce(serverConfig)
+      .mockRejectedValueOnce(new Error("503: Service unavailable"));
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    await screen.findByLabelText("Allow targets");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
+    expect(screen.getByText("listen")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/metadata could not be refreshed/i);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/save failed/i);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/operation failed/i);
+    expect(screen.getByLabelText("Allow targets")).toHaveValue("127.0.0.0/8");
+  });
+
   it("re-fetches config metadata and revisions after saving", async () => {
     const put = vi.mocked(api.putNodeConfig).mockResolvedValue({
       applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
