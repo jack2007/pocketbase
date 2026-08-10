@@ -224,6 +224,47 @@ func TestEditorDraftServerCompressionLevelOnly(t *testing.T) {
 	}
 }
 
+func TestEditorDraftClientProjectsOnlyWritablePeerFields(t *testing.T) {
+	t.Parallel()
+	draft, err := EditorDraft("client", map[string]any{
+		"version": float64(1),
+		"peers": []any{map[string]any{
+			"id":         "peer-a",
+			"proto_peer": "host:443",
+			"enabled":    true,
+			"status":     "connected",
+			"connection": map[string]any{
+				"encryption":         "enabled",
+				"compression":        map[string]any{"mode": "auto", "level": float64(3), "runtime": true},
+				"min_send_rate_kbps": float64(1000),
+				"runtime_state":      "ready",
+			},
+			"port_forwards": []any{map[string]any{
+				"listen": ":8080", "target": "127.0.0.1:80", "connections": float64(2),
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"peers": []any{map[string]any{
+		"peer_id":   "peer-a",
+		"quic_peer": "host:443",
+		"enabled":   true,
+		"connection": map[string]any{
+			"encryption":         "enabled",
+			"compression":        map[string]any{"mode": "auto", "level": float64(3)},
+			"min_send_rate_kbps": float64(1000),
+		},
+		"port_forwards": []any{map[string]any{
+			"listen": ":8080", "target": "127.0.0.1:80",
+		}},
+	}}}
+	if !reflect.DeepEqual(draft, want) {
+		t.Fatalf("draft = %#v, want %#v", draft, want)
+	}
+}
+
 func TestMergeClientPeersAllowsSendRateBounds(t *testing.T) {
 	t.Parallel()
 	actual := map[string]any{"peers": []any{

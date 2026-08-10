@@ -129,7 +129,11 @@ func (api *API) HandlePutNodeConfig(e *core.RequestEvent) error {
 		writeBody = patch
 		method = http.MethodPatch
 	case "client":
-		desired, err = configmerge.MergeClientPeers(actual, patch)
+		var normalizedActual map[string]any
+		normalizedActual, err = configmerge.NormalizeClientPeers(actual)
+		if err == nil {
+			desired, err = configmerge.MergeClientPeers(normalizedActual, patch)
+		}
 		writeBody = desired
 		method = http.MethodPut
 	}
@@ -149,6 +153,18 @@ func (api *API) HandlePutNodeConfig(e *core.RequestEvent) error {
 	if err != nil {
 		return e.InternalServerError("Failed to save desired config revision.", err)
 	}
+	summary := map[string]any{
+		"node_key":       nodeKey,
+		"role":           role,
+		"content_hash":   revision.GetString("content_hash"),
+		"ignored_fields": ignored,
+		"admin_status":   adminStatus,
+	}
+	if err := audit.RecordManagement(
+		e.App, actorID(e), audit.ActionNodeConfigUpdate, node.Id, e.RemoteIP(), summary,
+	); err != nil {
+		return e.InternalServerError("Failed to record config update audit.", err)
+	}
 
 	liveAfter, status, err := api.proxyConfig(ctx, nodeKey, http.MethodGet, path, nil)
 	if err != nil {
@@ -164,18 +180,6 @@ func (api *API) HandlePutNodeConfig(e *core.RequestEvent) error {
 	applied, err := configmerge.EditorDraft(role, safeAfter)
 	if err != nil {
 		return e.JSON(http.StatusBadGateway, errorResponse("invalid_proxy_response"))
-	}
-	summary := map[string]any{
-		"node_key":       nodeKey,
-		"role":           role,
-		"content_hash":   revision.GetString("content_hash"),
-		"ignored_fields": ignored,
-		"admin_status":   adminStatus,
-	}
-	if err := audit.RecordManagement(
-		e.App, actorID(e), audit.ActionNodeConfigUpdate, node.Id, e.RemoteIP(), summary,
-	); err != nil {
-		return e.InternalServerError("Failed to record config update audit.", err)
 	}
 	return e.JSON(http.StatusOK, map[string]any{
 		"applied":        applied,

@@ -197,20 +197,61 @@ func TestPutNodeConfigServerSendsTrimmedPatchAndAuditsSummary(t *testing.T) {
 	}
 }
 
-func TestPutNodeConfigClientSendsMergedDesired(t *testing.T) {
+func TestPutNodeConfigAuditsSuccessfulWriteWhenAppliedGetFails(t *testing.T) {
+	app, node, auth := newCenterTestApp(t)
+	setConfigNode(t, app, node, "server", true)
+	hub := &configHub{online: true, gets: []agenthub.ProxyResponse{configResponse(map[string]any{
+		"allow_targets": []any{"10.0.0.0/8"},
+	})}}
+	api := &API{hub: hub}
+
+	response := performCenterRequest(t, app, auth, http.MethodPut,
+		"/api/center/nodes/"+node.GetString("node_key")+"/config",
+		node.GetString("node_key"), map[string]any{
+			"content": map[string]any{"allow_targets": []any{"127.0.0.0/8"}},
+		}, api.HandlePutNodeConfig)
+
+	assertConfigError(t, response.Code, response.Body.Bytes(), http.StatusBadGateway, "admin_unreachable")
+	revisions, err := app.FindRecordsByFilter(
+		"config_revisions",
+		"node = {:node} && kind = 'desired' && source = 'manual_edit'",
+		"", 10, 0, map[string]any{"node": node.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revisions) != 1 {
+		t.Fatalf("desired revisions = %d, want 1", len(revisions))
+	}
+	audits, err := app.FindRecordsByFilter(
+		"audit_logs", "action = 'node.config.update' && node = {:node}",
+		"", 10, 0, map[string]any{"node": node.Id},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audits) != 1 {
+		t.Fatalf("audits = %d, want 1 after successful write", len(audits))
+	}
+}
+
+func TestPutNodeConfigClientNormalizesAdminPeersBeforeMerge(t *testing.T) {
 	app, node, auth := newCenterTestApp(t)
 	setConfigNode(t, app, node, "client", true)
 	actual := map[string]any{
 		"version": float64(1),
 		"peers": []any{
 			map[string]any{
-				"peer_id": "peer-a",
+				"id":         "peer-a",
+				"proto_peer": "old:443",
+				"status":     "connected",
 				"connection": map[string]any{
 					"encryption":         "enabled",
 					"max_send_rate_kbps": float64(0),
+					"runtime_state":      "ready",
 				},
 			},
-			map[string]any{"peer_id": "peer-b", "quic_peer": "keep:443"},
+			map[string]any{"id": "peer-b", "proto_peer": "keep:443"},
 		},
 	}
 	hub := &configHub{online: true, gets: []agenthub.ProxyResponse{configResponse(actual), configResponse(actual)}}
@@ -240,13 +281,29 @@ func TestPutNodeConfigClientSendsMergedDesired(t *testing.T) {
 	}
 	body := decodeConfigRequest(t, hub.puts[0])
 	peers := body["peers"].([]any)
-	if len(peers) != 2 || peers[1].(map[string]any)["peer_id"] != "peer-b" {
+	if len(peers) != 2 ||
+		peers[0].(map[string]any)["peer_id"] != "peer-a" ||
+		peers[1].(map[string]any)["peer_id"] != "peer-b" ||
+		peers[1].(map[string]any)["quic_peer"] != "keep:443" {
 		t.Fatalf("merged peers = %#v", peers)
 	}
 	connection := peers[0].(map[string]any)["connection"].(map[string]any)
 	if connection["encryption"] != "enabled" ||
 		connection["max_send_rate_kbps"] != float64(2000) {
 		t.Fatalf("peer-a connection = %#v", connection)
+	}
+	var result struct {
+		Applied map[string]any `json:"applied"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	appliedPeer := result.Applied["peers"].([]any)[0].(map[string]any)
+	if _, ok := appliedPeer["status"]; ok {
+		t.Fatalf("applied contains non-writable status: %#v", appliedPeer)
+	}
+	if _, ok := appliedPeer["connection"].(map[string]any)["runtime_state"]; ok {
+		t.Fatalf("applied contains non-writable runtime_state: %#v", appliedPeer)
 	}
 }
 
@@ -330,6 +387,43 @@ func TestGetNodeConfigOnlineRedactsAndProjects(t *testing.T) {
 	}
 	if result.EditorDraft["allow_targets"] == nil || len(result.WritablePaths) == 0 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestGetNodeConfigClientEditorDraftProjectsWritableFields(t *testing.T) {
+	app, node, auth := newCenterTestApp(t)
+	setConfigNode(t, app, node, "client", true)
+	hub := &configHub{online: true, gets: []agenthub.ProxyResponse{configResponse(map[string]any{
+		"peers": []any{map[string]any{
+			"id": "peer-a", "proto_peer": "host:443", "status": "connected",
+		}},
+	})}}
+	api := &API{hub: hub}
+
+	response := performCenterRequest(t, app, auth, http.MethodGet,
+		"/api/center/nodes/"+node.GetString("node_key")+"/config",
+		node.GetString("node_key"), nil, api.HandleGetNodeConfig)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var result struct {
+		Live        map[string]any `json:"live"`
+		EditorDraft map[string]any `json:"editor_draft"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	livePeer := result.Live["peers"].([]any)[0].(map[string]any)
+	draftPeer := result.EditorDraft["peers"].([]any)[0].(map[string]any)
+	if livePeer["status"] != "connected" {
+		t.Fatalf("live must retain status: %#v", livePeer)
+	}
+	if draftPeer["peer_id"] != "peer-a" || draftPeer["quic_peer"] != "host:443" {
+		t.Fatalf("editor_draft aliases not normalized: %#v", draftPeer)
+	}
+	if _, ok := draftPeer["status"]; ok {
+		t.Fatalf("editor_draft contains non-writable status: %#v", draftPeer)
 	}
 }
 

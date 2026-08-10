@@ -291,8 +291,21 @@ func EditorDraft(role string, live map[string]any) (map[string]any, error) {
 			return nil, err
 		}
 		draft := map[string]any{}
-		if peers, ok := normalized["peers"]; ok {
-			draft["peers"] = peers
+		if peers, ok := normalized["peers"].([]any); ok {
+			projected := make([]any, 0, len(peers))
+			for _, raw := range peers {
+				peer, ok := raw.(map[string]any)
+				if !ok {
+					return nil, errors.New("each peer must be an object")
+				}
+				ignored := []string{}
+				trimmed, err := trimPeer(peer, &ignored)
+				if err != nil {
+					return nil, err
+				}
+				projected = append(projected, trimmed)
+			}
+			draft["peers"] = projected
 		}
 		return draft, nil
 	default:
