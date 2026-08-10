@@ -198,6 +198,32 @@ func TestEditorDraftServerFlattensDesiredConnection(t *testing.T) {
 	}
 }
 
+func TestEditorDraftServerCompressionLevelOnly(t *testing.T) {
+	t.Parallel()
+	draft, err := EditorDraft("server", map[string]any{
+		"allow_targets": []any{"10.0.0.0/8"},
+		"connection_config": map[string]any{
+			"desired": map[string]any{
+				"compression": map[string]any{
+					"mode":  "zstd",
+					"level": float64(5),
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := draft["connection"].(map[string]any)
+	comp := conn["compression"].(map[string]any)
+	if _, ok := comp["mode"]; ok {
+		t.Fatalf("draft must not include compression.mode, got %#v", comp)
+	}
+	if comp["level"] != float64(5) {
+		t.Fatalf("draft compression=%#v", comp)
+	}
+}
+
 func TestMergeClientPeersAllowsSendRateBounds(t *testing.T) {
 	t.Parallel()
 	actual := map[string]any{"peers": []any{

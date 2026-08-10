@@ -274,8 +274,10 @@ func EditorDraft(role string, live map[string]any) (map[string]any, error) {
 		if connectionConfig, ok := live["connection_config"].(map[string]any); ok {
 			if desired, ok := connectionConfig["desired"].(map[string]any); ok {
 				conn := map[string]any{}
-				if compression, ok := desired["compression"]; ok {
-					conn["compression"] = compression
+				if compression, ok := desired["compression"].(map[string]any); ok {
+					if level, ok := compression["level"]; ok {
+						conn["compression"] = map[string]any{"level": level}
+					}
 				}
 				if len(conn) > 0 {
 					draft["connection"] = conn
