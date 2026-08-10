@@ -375,16 +375,112 @@ func trimClient(content map[string]any) (map[string]any, []string, error) {
 	if !ok {
 		return nil, nil, errors.New("peers must be an array")
 	}
+	trimmedPeers := make([]any, 0, len(outPeers))
 	for _, raw := range outPeers {
 		peer, ok := raw.(map[string]any)
 		if !ok {
 			return nil, nil, errors.New("each peer must be an object")
 		}
-		if err := validatePeer(peer); err != nil {
+		trimmed, err := trimPeer(peer, &ignored)
+		if err != nil {
 			return nil, nil, err
 		}
+		trimmedPeers = append(trimmedPeers, trimmed)
 	}
-	return map[string]any{"peers": outPeers}, ignored, nil
+	return map[string]any{"peers": trimmedPeers}, ignored, nil
+}
+
+func trimPeer(peer map[string]any, ignored *[]string) (map[string]any, error) {
+	out := map[string]any{}
+	for key, value := range peer {
+		if !allowedPeerFields[key] {
+			*ignored = append(*ignored, key)
+			continue
+		}
+		switch key {
+		case "connection":
+			connection, ok := value.(map[string]any)
+			if !ok {
+				return nil, errors.New("connection must be an object")
+			}
+			connPatch, err := trimPeerConnection(connection, ignored)
+			if err != nil {
+				return nil, err
+			}
+			if len(connPatch) > 0 {
+				out[key] = connPatch
+			}
+		case "port_forwards":
+			forwards, ok := value.([]any)
+			if !ok {
+				return nil, errors.New("port_forwards must be an array")
+			}
+			trimmed, err := trimPortForwards(forwards, ignored)
+			if err != nil {
+				return nil, err
+			}
+			if len(trimmed) > 0 {
+				out[key] = trimmed
+			}
+		default:
+			out[key] = value
+		}
+	}
+	return out, nil
+}
+
+func trimPeerConnection(connection map[string]any, ignored *[]string) (map[string]any, error) {
+	out := map[string]any{}
+	for connectionKey, connectionValue := range connection {
+		switch connectionKey {
+		case "encryption":
+			out[connectionKey] = connectionValue
+		case "compression":
+			compression, ok := connectionValue.(map[string]any)
+			if !ok {
+				return nil, errors.New("connection.compression must be an object")
+			}
+			compPatch := map[string]any{}
+			for compressionKey, compressionValue := range compression {
+				if compressionKey != "mode" && compressionKey != "level" {
+					*ignored = append(*ignored, compressionKey)
+					continue
+				}
+				compPatch[compressionKey] = compressionValue
+			}
+			if len(compPatch) > 0 {
+				out["compression"] = compPatch
+			}
+		case "min_send_rate_kbps", "max_send_rate_kbps":
+			if err := nonNegativeNumber(connectionKey, connectionValue); err != nil {
+				return nil, err
+			}
+			out[connectionKey] = connectionValue
+		default:
+			*ignored = append(*ignored, connectionKey)
+		}
+	}
+	return out, nil
+}
+
+func trimPortForwards(forwards []any, ignored *[]string) ([]any, error) {
+	out := make([]any, len(forwards))
+	for i, raw := range forwards {
+		forward, ok := raw.(map[string]any)
+		if !ok {
+			return nil, errors.New("each port_forward must be an object")
+		}
+		trimmed := map[string]any{}
+		for forwardKey, forwardValue := range forward {
+			if forwardKey != "listen" && forwardKey != "target" {
+				*ignored = append(*ignored, forwardKey)
+				continue
+			}
+			trimmed[forwardKey] = forwardValue
+		}
+		out[i] = trimmed
+	}
+	return out, nil
 }
 
 func normalizePeerAliases(peer map[string]any) {
@@ -468,6 +564,9 @@ func nonNegativeNumber(name string, value any) error {
 	}
 	if number < 0 || math.IsNaN(number) || math.IsInf(number, 0) {
 		return fmt.Errorf("%s must be >= 0", name)
+	}
+	if math.Trunc(number) != number {
+		return fmt.Errorf("%s must be an integer", name)
 	}
 	return nil
 }

@@ -299,6 +299,82 @@ func TestMergeClientPeersPartialConnectionPreservesEncryption(t *testing.T) {
 	}
 }
 
+func TestTrimForRoleClientTrimsNonWhitelistPeerFields(t *testing.T) {
+	t.Parallel()
+	patch, ignored, err := TrimForRole("client", map[string]any{
+		"peers": []any{map[string]any{
+			"peer_id":   "peer-a",
+			"quic_peer": "10.0.0.2:4433",
+			"status":    "connected",
+			"connection": map[string]any{
+				"encryption":         "enabled",
+				"compression":        map[string]any{"mode": "auto", "level": float64(3), "unknown": true},
+				"min_send_rate_kbps": float64(1000),
+				"legacy_field":       "drop",
+			},
+			"port_forwards": []any{map[string]any{
+				"listen": ":8080", "target": "127.0.0.1:80", "extra": "x",
+			}},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer := patch["peers"].([]any)[0].(map[string]any)
+	if _, ok := peer["status"]; ok {
+		t.Fatalf("status must be trimmed: %#v", peer)
+	}
+	conn := peer["connection"].(map[string]any)
+	if _, ok := conn["legacy_field"]; ok {
+		t.Fatalf("connection legacy_field must be trimmed: %#v", conn)
+	}
+	comp := conn["compression"].(map[string]any)
+	if _, ok := comp["unknown"]; ok {
+		t.Fatalf("compression unknown must be trimmed: %#v", comp)
+	}
+	forward := peer["port_forwards"].([]any)[0].(map[string]any)
+	if _, ok := forward["extra"]; ok {
+		t.Fatalf("port_forward extra must be trimmed: %#v", forward)
+	}
+	joined := strings.Join(ignored, ",")
+	for _, want := range []string{"status", "legacy_field", "unknown", "extra"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("ignored=%v want %q", ignored, want)
+		}
+	}
+}
+
+func TestTrimForRoleClientRejectsFractionalSendRate(t *testing.T) {
+	t.Parallel()
+	_, _, err := TrimForRole("client", map[string]any{
+		"peers": []any{map[string]any{
+			"peer_id": "peer-a",
+			"connection": map[string]any{
+				"min_send_rate_kbps": float64(1.5),
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected fractional min_send_rate_kbps to be rejected")
+	}
+}
+
+func TestMergeClientPeersRejectsFractionalSendRate(t *testing.T) {
+	t.Parallel()
+	actual := map[string]any{"peers": []any{}}
+	_, err := MergeClientPeers(actual, map[string]any{
+		"peers": []any{map[string]any{
+			"peer_id": "peer-a",
+			"connection": map[string]any{
+				"max_send_rate_kbps": float64(1.5),
+			},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected fractional max_send_rate_kbps to be rejected")
+	}
+}
+
 func TestRedactMasksSecrets(t *testing.T) {
 	t.Parallel()
 	out := Redact(map[string]any{
