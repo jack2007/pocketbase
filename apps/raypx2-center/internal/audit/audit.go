@@ -7,15 +7,16 @@ import (
 )
 
 const (
-	ActionAgentEnroll    = "agent.enroll"
-	ActionProxyRequest   = "proxy.request"
-	ActionNodeCreate     = "node.create"
-	ActionNodeDelete     = "node.delete"
-	ActionNodeRotate     = "node.rotate_enroll"
-	ActionNodeRevoke     = "node.revoke"
-	ActionTemplateCreate = "template.create"
-	ActionTemplateUpdate = "template.update"
-	ActionApplyJobCreate = "apply_job.create"
+	ActionAgentEnroll      = "agent.enroll"
+	ActionProxyRequest     = "proxy.request"
+	ActionNodeCreate       = "node.create"
+	ActionNodeDelete       = "node.delete"
+	ActionNodeRotate       = "node.rotate_enroll"
+	ActionNodeRevoke       = "node.revoke"
+	ActionNodeConfigUpdate = "node.config.update"
+	ActionTemplateCreate   = "template.create"
+	ActionTemplateUpdate   = "template.update"
+	ActionApplyJobCreate   = "apply_job.create"
 )
 
 // RecordAgentEnroll stores a secret-free enrollment outcome.

@@ -133,7 +133,7 @@ func (api *API) HandleDeleteNode(e *core.RequestEvent) error {
 		return e.JSON(http.StatusConflict, errorResponse("node_delete_failed"))
 	}
 
-	api.hub.Kick(nodeKey, "deleted")
+	api.agentHub.Kick(nodeKey, "deleted")
 	return e.NoContent(http.StatusNoContent)
 }
 
@@ -192,7 +192,7 @@ func (api *API) HandleRotateEnroll(e *core.RequestEvent) error {
 		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
 	}
 
-	api.hub.Kick(nodeKey, "rotated")
+	api.agentHub.Kick(nodeKey, "rotated")
 	return e.JSON(http.StatusOK, map[string]string{"enroll_secret": secret})
 }
 
@@ -221,7 +221,7 @@ func (api *API) HandleRevokeNode(e *core.RequestEvent) error {
 		return e.JSON(http.StatusNotFound, errorResponse("node_not_found"))
 	}
 
-	api.hub.Kick(nodeKey, "revoked")
+	api.agentHub.Kick(nodeKey, "revoked")
 	return e.JSON(http.StatusOK, map[string]string{"enroll_status": "revoked"})
 }
 

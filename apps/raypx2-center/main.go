@@ -43,6 +43,8 @@ func main() {
 		center.POST("/nodes/{node_key}/rotate-enroll", centerAPI.HandleRotateEnroll)
 		center.POST("/nodes/{node_key}/revoke", centerAPI.HandleRevokeNode)
 		center.POST("/nodes/{node_key}/proxy", centerAPI.HandleProxy)
+		center.GET("/nodes/{node_key}/config", centerAPI.HandleGetNodeConfig)
+		center.PUT("/nodes/{node_key}/config", centerAPI.HandlePutNodeConfig)
 		center.GET("/templates", centerAPI.HandleListTemplates)
 		center.POST("/templates", centerAPI.HandleCreateTemplate)
 		center.PUT("/templates/{template_id}", centerAPI.HandleUpdateTemplate)

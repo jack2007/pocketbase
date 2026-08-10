@@ -54,6 +54,21 @@ func TestCenterRoutesRequireSuperuserAuth(t *testing.T) {
 			expected:       []string{`"items"`},
 		},
 		{
+			name:           "unauthenticated GET /api/center/nodes/{node_key}/config",
+			method:         http.MethodGet,
+			url:            "/api/center/nodes/missing/config",
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
+			name:           "unauthenticated PUT /api/center/nodes/{node_key}/config",
+			method:         http.MethodPut,
+			url:            "/api/center/nodes/missing/config",
+			body:           `{"content":{"allow_targets":["127.0.0.0/8"]}}`,
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
 			name:           "unauthenticated GET /api/center/templates",
 			method:         http.MethodGet,
 			url:            "/api/center/templates",
@@ -138,6 +153,8 @@ func bindCenterAPIRoutes(t testing.TB, _ *tests.TestApp, e *core.ServeEvent) {
 	center.POST("/nodes", api.HandleCreateNode)
 	center.GET("/nodes", api.HandleListNodes)
 	center.DELETE("/nodes/{node_key}", api.HandleDeleteNode)
+	center.GET("/nodes/{node_key}/config", api.HandleGetNodeConfig)
+	center.PUT("/nodes/{node_key}/config", api.HandlePutNodeConfig)
 	center.GET("/templates", api.HandleListTemplates)
 	center.GET("/apply-jobs", api.HandleListApplyJobs)
 }
