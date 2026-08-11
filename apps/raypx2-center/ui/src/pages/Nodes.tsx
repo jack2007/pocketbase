@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import type { CreateNodeInput, CreateNodeResult } from "../api";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -43,6 +43,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/node-utils";
+import { cn } from "@/lib/utils";
 
 export interface CenterNode {
   id: string;
@@ -71,6 +72,7 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
   const [error, setError] = useState("");
   const [secret, setSecret] = useState("");
   const [role, setRole] = useState<CreateNodeInput["role"]>("unknown");
+  const secretInputRef = useRef<HTMLTextAreaElement>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -113,6 +115,29 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
     setSecret("");
     setError("");
     setRole("unknown");
+  }
+
+  async function copySecret() {
+    const value = secretInputRef.current?.value || secret;
+    if (!value) return;
+
+    try {
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        const input = secretInputRef.current;
+        if (!input) throw new Error("secret input missing");
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, input.value.length);
+        const ok = document.execCommand("copy");
+        input.setSelectionRange(0, 0);
+        if (!ok) throw new Error("copy failed");
+      }
+      toast.success("Secret copied");
+    } catch {
+      toast.error("Unable to copy secret");
+    }
   }
 
   return (
@@ -206,14 +231,24 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
                   This secret is shown only once. Store it before closing.
                 </DialogDescription>
               </DialogHeader>
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 font-mono text-sm break-all">
-                {secret}
-              </div>
+              <textarea
+                ref={secretInputRef}
+                readOnly
+                value={secret}
+                rows={3}
+                aria-label="Enrollment secret"
+                onFocus={(event) => event.currentTarget.select()}
+                className={cn(
+                  "w-full resize-none rounded-md border px-3 py-2 font-mono text-sm break-all outline-none",
+                  "border-emerald-500/30 bg-emerald-500/10",
+                  "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+                )}
+              />
               <DialogFooter>
-                <Button variant="outline" onClick={() => void navigator.clipboard?.writeText(secret)}>
+                <Button type="button" variant="outline" onClick={() => void copySecret()}>
                   Copy secret
                 </Button>
-                <Button onClick={closeDialog}>Done</Button>
+                <Button type="button" onClick={closeDialog}>Done</Button>
               </DialogFooter>
             </>
           ) : (
@@ -225,7 +260,7 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
               <div className="mt-4 space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
-                  <Input id="name" name="name" placeholder="Singapore edge" autoFocus />
+                  <Input id="name" name="name" placeholder="Peer name" autoFocus />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="node_key">Node key <span className="text-muted-foreground">(optional)</span></Label>
@@ -252,7 +287,7 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
               </div>
               <DialogFooter className="mt-6">
                 <Button type="button" variant="outline" onClick={closeDialog}>Cancel</Button>
-                <Button disabled={submitting}>{submitting ? "Creating…" : "Create node"}</Button>
+                <Button disabled={submitting}>{submitting ? "Creating…" : "Confirm"}</Button>
               </DialogFooter>
             </form>
           )}
