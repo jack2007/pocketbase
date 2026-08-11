@@ -296,6 +296,116 @@ describe("NodeDetail", () => {
 
     expect(confirm).not.toHaveBeenCalled();
   });
+
+  it("shows a Tunnels tab", () => {
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    expect(screen.getByRole("tab", { name: "Tunnels" })).toBeInTheDocument();
+  });
+
+  it("loads client tunnels through the node proxy with client columns", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockResolvedValue({
+      tunnels: [
+        {
+          tunnel_id: "t-1",
+          peer_id: "p1",
+          connection_id: "c1",
+          target: "10.0.0.1:443",
+          state: "open",
+          role: "client",
+          ingress: "socks",
+          compress: "disabled",
+          created_at: "2026-08-11T00:00:00Z",
+          duration_ms: 1000,
+          tcp_read_bytes: 10,
+          tcp_write_bytes: 20,
+          pending_bytes: 0,
+          relay_backend: "linux",
+          worker_index: 1,
+          last_error: "",
+        },
+      ],
+    });
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Tunnels" }));
+
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/tunnels");
+    });
+    expect(api.proxyNode).not.toHaveBeenCalledWith(
+      node.node_key,
+      "GET",
+      "/api/v1/server/tunnels",
+    );
+    expect(screen.getByText("t-1")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "tunnel_id" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "tcp_read_bytes" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /abort/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /drain/i })).not.toBeInTheDocument();
+  });
+
+  it("loads server tunnels through the node proxy with server columns", async () => {
+    vi.mocked(api.proxyNode).mockResolvedValue({
+      tunnels: [
+        {
+          tunnel_id: "st-1",
+          peer_id: "sp1",
+          connection_id: "sc1",
+          state: "open",
+          target: "192.168.1.1:80",
+          role: "server",
+          duration_ms: 500,
+          active: true,
+        },
+      ],
+    });
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Tunnels" }));
+
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        onlineServer.node_key,
+        "GET",
+        "/api/v1/server/tunnels",
+      );
+    });
+    expect(screen.getByText("st-1")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "active" })).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "tcp_read_bytes" })).not.toBeInTheDocument();
+  });
+
+  it("does not proxy tunnels when the node is offline", async () => {
+    render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Tunnels" }));
+
+    expect(
+      await screen.findByText("Tunnels are unavailable while this node is offline."),
+    ).toBeInTheDocument();
+    expect(api.proxyNode).not.toHaveBeenCalled();
+  });
+
+  it("does not proxy tunnels for unknown role", async () => {
+    const node: CenterNode = {
+      id: "node-u1",
+      node_key: "unknown-1",
+      name: "Unknown node",
+      role: "unknown",
+      online: true,
+    };
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Tunnels" }));
+
+    expect(
+      await screen.findByText('Tunnel inventory is not available for role "unknown".'),
+    ).toBeInTheDocument();
+    expect(api.proxyNode).not.toHaveBeenCalled();
+  });
 });
 
 describe("center config API", () => {

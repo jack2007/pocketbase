@@ -10,7 +10,7 @@ import {
 } from "../api";
 import type { CenterNode } from "./Nodes";
 
-type Tab = "overview" | "ops" | "config" | "audit";
+type Tab = "overview" | "ops" | "tunnels" | "config" | "audit";
 type JsonObject = Record<string, unknown>;
 
 interface NodeDetailProps {
@@ -43,7 +43,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
       </div>
 
       <div className="tabs" role="tablist" aria-label="Node detail">
-        {(["overview", "ops", "config", "audit"] as Tab[]).map((item) => (
+        {(["overview", "ops", "tunnels", "config", "audit"] as Tab[]).map((item) => (
           <button
             key={item}
             role="tab"
@@ -60,6 +60,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
 
       {tab === "overview" && <NodeOverview node={node} />}
       {tab === "ops" && <NodeOps node={node} />}
+      {tab === "tunnels" && <NodeTunnels node={node} />}
       {tab === "config" && <NodeConfig node={node} onDirtyChange={setConfigDirty} />}
       {tab === "audit" && <NodeAudit node={node} />}
     </section>
@@ -569,6 +570,131 @@ function NodeOps({ node }: { node: CenterNode }) {
       {node.role === "server" && (
         <ConnectionsTable connections={connections} loading={loading} />
       )}
+    </div>
+  );
+}
+
+const CLIENT_TUNNEL_COLUMNS = [
+  "tunnel_id",
+  "peer_id",
+  "connection_id",
+  "target",
+  "state",
+  "role",
+  "ingress",
+  "compress",
+  "created_at",
+  "duration_ms",
+  "tcp_read_bytes",
+  "tcp_write_bytes",
+  "pending_bytes",
+  "relay_backend",
+  "worker_index",
+  "last_error",
+] as const;
+
+const SERVER_TUNNEL_COLUMNS = [
+  "tunnel_id",
+  "peer_id",
+  "connection_id",
+  "state",
+  "target",
+  "role",
+  "duration_ms",
+  "active",
+] as const;
+
+function NodeTunnels({ node }: { node: CenterNode }) {
+  const [tunnels, setTunnels] = useState<JsonObject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const columns =
+    node.role === "client"
+      ? CLIENT_TUNNEL_COLUMNS
+      : node.role === "server"
+        ? SERVER_TUNNEL_COLUMNS
+        : null;
+
+  async function load() {
+    if (!node.online || !columns) {
+      setTunnels([]);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const path =
+        node.role === "server" ? "/api/v1/server/tunnels" : "/api/v1/tunnels";
+      const result = await proxyNode(node.node_key, "GET", path);
+      setTunnels(itemsFrom(result, "tunnels"));
+    } catch (cause) {
+      setError(errorMessage(cause));
+      // Keep previous tunnels on failure (same as Ops keeping prior health/peers).
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, [node.id, node.role, node.online]);
+
+  if (!node.online) {
+    return (
+      <div className="ops-stack">
+        <div className="offline-notice">Tunnels are unavailable while this node is offline.</div>
+      </div>
+    );
+  }
+
+  if (!columns) {
+    return (
+      <div className="ops-stack">
+        <p className="muted">Tunnel inventory is not available for role "{node.role}".</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ops-stack">
+      {error && <div className="alert" role="alert">{error}</div>}
+      <div className="panel ops-panel">
+        <PanelHeading title="Tunnels" onRefresh={() => void load()} loading={loading} />
+        <div className="table-shell compact">
+          <table>
+            <thead>
+              <tr>
+                {columns.map((column) => (
+                  <th key={column}>{column}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {tunnels.length === 0 && (
+                <EmptyRow columns={columns.length} loading={loading} />
+              )}
+              {tunnels.map((tunnel, index) => {
+                const key =
+                  typeof tunnel.tunnel_id === "string" && tunnel.tunnel_id
+                    ? tunnel.tunnel_id
+                    : String(index);
+                return (
+                  <tr key={key}>
+                    {columns.map((column) => (
+                      <td key={column} className={column === "tunnel_id" ? "strong" : undefined}>
+                        {display(tunnel[column])}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
