@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Status (2026-08-10):** 中心侧 Tasks 1–4、7–10 已交付。Agent 侧后续开发文档与执行已迁至 **raypx2** 仓库：`/home/jack/src/raypx2/docs/superpowers/plans/2026-08-09-raypx2-center-agent.md`（本仓镜像见 [2026-08-09-raypx2-center-agent.md](./2026-08-09-raypx2-center-agent.md)）。WSS 选型已锁定为 cpp-httplib `WebSocketClient` + bundled quictls。
+
 **Goal:** 在 PocketBase 应用中交付多 raypx2 节点的中心管理控制台（出站 Agent、两阶段认证、Admin 反向隧道、配置模板应用到多节点），并在 raypx2 内嵌最小可用 Agent。
 
 **Architecture:** 中心为 `apps/raypx2-center`（`pocketbase.New()` + 自定义路由 + SQLite 集合 + embed SPA）。节点内嵌 Agent 出站 `enroll → session → WSS`，经 JSON 帧把中心代理请求转到本机 `127.0.0.1` Admin `/api/v1/*`。P0 只持久化当前摘要、配置修订与审计。

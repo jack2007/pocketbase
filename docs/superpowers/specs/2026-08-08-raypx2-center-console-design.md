@@ -2,6 +2,7 @@
 
 **日期：** 2026-08-08  
 **状态：** 已批准  
+**执行归属（2026-08-10）：** Agent 侧后续开发以 raypx2 仓库副本为准：`/home/jack/src/raypx2/docs/superpowers/specs/2026-08-08-raypx2-center-console-design.md`。本文件为 pocketbase 侧归档镜像。  
 **范围仓库：**
 
 - 中心应用：`/home/jack/src/pocketbase`（PocketBase 作 Go 框架，新增 `apps/raypx2-center`）

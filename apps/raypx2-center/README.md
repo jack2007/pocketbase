@@ -86,14 +86,16 @@ and shows Health from the merged `health_status` field on the Overview tab.
 
 ## M1 manual smoke check
 
-Real raypx2 Agent wiring is deferred for this milestone.
-
-1. Run `npm test && npm run build` in `ui/`.
+1. Run `npm test && npm run build` in `ui/` when changing the SPA.
 2. Start the center and verify `GET /app/` returns `200`.
 3. Sign in at `/app/` as a PocketBase superuser.
-4. Open **Nodes**, create a node, and save the one-time enrollment secret.
+4. Open **Nodes**, create a node, and save the one-time enrollment secret into the
+   raypx2 `center.enroll_secret_file` JSON (`version` + `enroll_secret`).
 5. Verify the new node is listed and `GET /api/center/nodes` succeeds with the
    superuser token.
-6. With an online agent reporting status, confirm Health shows a value such as
+6. On the node, set `center.enabled=true` with `url` / `node_key` / secret file
+   (see raypx2 `docs/center-agent_cn.md`), ensure Admin is listening, then start
+   raypx2. Confirm SPA shows `online=true` and Ops proxy works.
+7. With an online agent reporting status, confirm Health shows a value such as
    `healthy` instead of Unknown.
-7. Delete a node from the UI and confirm it disappears after refresh.
+8. Delete a node from the UI and confirm it disappears after refresh.
