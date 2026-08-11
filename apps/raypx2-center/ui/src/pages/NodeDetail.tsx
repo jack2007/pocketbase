@@ -155,6 +155,7 @@ function NodeConfig({
       content = parsed;
       setDraft(parsed);
     }
+    content = stripDraftPeerMarkers(content);
     const validationError = validateConfig(role, content);
     if (validationError) {
       setError(validationError);
@@ -333,109 +334,134 @@ function ConfigForm({
     const peers = Array.isArray(draft.peers) ? draft.peers.filter(isObject) : [];
     return (
       <div className="config-form peer-list">
-        {peers.length === 0 && <p className="muted">No peers returned.</p>}
-        {peers.map((peer, index) => (
-          <fieldset className="peer-editor" key={itemId(peer) || index}>
-            <legend>Peer {index + 1}</legend>
-            <label>
-              Peer ID
-              <input value={displayInput(peer.peer_id)} readOnly />
-            </label>
-            {[
-              ["client_name", "Client name"],
-              ["quic_peer", "QUIC peer"],
-              ["socks_listen", "SOCKS listen"],
-              ["http_listen", "HTTP listen"],
-            ].map(([key, label]) => (
-              <label key={key}>
-                {label}
+        {peers.length === 0 && <p className="muted">No peers in the draft. Use Add peer to create one.</p>}
+        {peers.map((peer, index) => {
+          const isDraftNew = peer._draft_new === true;
+          return (
+            <fieldset className="peer-editor" key={itemId(peer) || `draft-${index}`}>
+              <legend>Peer {index + 1}</legend>
+              <label>
+                Peer ID
                 <input
-                  value={displayInput(peer[key])}
-                  readOnly={readOnly}
-                  onChange={(event) => onChange(updatePeer(draft, index, key, event.target.value))}
+                  value={displayInput(peer.peer_id)}
+                  readOnly={readOnly || !isDraftNew}
+                  onChange={(event) => onChange(updatePeer(draft, index, "peer_id", event.target.value))}
                 />
               </label>
-            ))}
-            <label>
-              QUIC connections
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={displayInput(peer.quic_connections)}
-                readOnly={readOnly}
-                onChange={(event) => onChange(updatePeer(
-                  draft,
-                  index,
-                  "quic_connections",
-                  event.target.value === "" ? "" : Number(event.target.value),
-                ))}
-              />
-            </label>
-            <div className="port-forward-list">
-              <strong>Port forwards</strong>
-              {(Array.isArray(peer.port_forwards) ? peer.port_forwards.filter(isObject) : []).map((forward, forwardIndex) => (
-                <fieldset key={forwardIndex}>
-                  <legend>Port forward {forwardIndex + 1}</legend>
-                  <label>
-                    Port forward {forwardIndex + 1} listen
-                    <input
-                      value={displayInput(forward.listen)}
-                      readOnly={readOnly}
-                      onChange={(event) => onChange(updatePeerPortForward(
-                        draft,
-                        index,
-                        forwardIndex,
-                        "listen",
-                        event.target.value,
-                      ))}
-                    />
-                  </label>
-                  <label>
-                    Port forward {forwardIndex + 1} target
-                    <input
-                      value={displayInput(forward.target)}
-                      readOnly={readOnly}
-                      onChange={(event) => onChange(updatePeerPortForward(
-                        draft,
-                        index,
-                        forwardIndex,
-                        "target",
-                        event.target.value,
-                      ))}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    className="button secondary small"
-                    disabled={readOnly}
-                    onClick={() => onChange(removePeerPortForward(draft, index, forwardIndex))}
-                  >
-                    Remove port forward {forwardIndex + 1}
-                  </button>
-                </fieldset>
+              {[
+                ["client_name", "Client name"],
+                ["quic_peer", "QUIC peer"],
+                ["socks_listen", "SOCKS listen"],
+                ["http_listen", "HTTP listen"],
+              ].map(([key, label]) => (
+                <label key={key}>
+                  {label}
+                  <input
+                    value={displayInput(peer[key])}
+                    readOnly={readOnly}
+                    onChange={(event) => onChange(updatePeer(draft, index, key, event.target.value))}
+                  />
+                </label>
               ))}
-              <button
-                type="button"
-                className="button secondary small"
-                disabled={readOnly}
-                onClick={() => onChange(addPeerPortForward(draft, index))}
-              >
-                Add port forward
-              </button>
-            </div>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={peer.enabled !== false}
-                disabled={readOnly}
-                onChange={(event) => onChange(updatePeer(draft, index, "enabled", event.target.checked))}
-              />
-              Enabled
-            </label>
-          </fieldset>
-        ))}
-        <p className="muted">Peers can be edited here, but not deleted.</p>
+              <label>
+                QUIC connections
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={displayInput(peer.quic_connections)}
+                  readOnly={readOnly}
+                  onChange={(event) => onChange(updatePeer(
+                    draft,
+                    index,
+                    "quic_connections",
+                    event.target.value === "" ? "" : Number(event.target.value),
+                  ))}
+                />
+              </label>
+              <div className="port-forward-list">
+                <strong>Port forwards</strong>
+                {(Array.isArray(peer.port_forwards) ? peer.port_forwards.filter(isObject) : []).map((forward, forwardIndex) => (
+                  <fieldset key={forwardIndex}>
+                    <legend>Port forward {forwardIndex + 1}</legend>
+                    <label>
+                      Port forward {forwardIndex + 1} listen
+                      <input
+                        value={displayInput(forward.listen)}
+                        readOnly={readOnly}
+                        onChange={(event) => onChange(updatePeerPortForward(
+                          draft,
+                          index,
+                          forwardIndex,
+                          "listen",
+                          event.target.value,
+                        ))}
+                      />
+                    </label>
+                    <label>
+                      Port forward {forwardIndex + 1} target
+                      <input
+                        value={displayInput(forward.target)}
+                        readOnly={readOnly}
+                        onChange={(event) => onChange(updatePeerPortForward(
+                          draft,
+                          index,
+                          forwardIndex,
+                          "target",
+                          event.target.value,
+                        ))}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button secondary small"
+                      disabled={readOnly}
+                      onClick={() => onChange(removePeerPortForward(draft, index, forwardIndex))}
+                    >
+                      Remove port forward {forwardIndex + 1}
+                    </button>
+                  </fieldset>
+                ))}
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={readOnly}
+                  onClick={() => onChange(addPeerPortForward(draft, index))}
+                >
+                  Add port forward
+                </button>
+              </div>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={peer.enabled !== false}
+                  disabled={readOnly}
+                  onChange={(event) => onChange(updatePeer(draft, index, "enabled", event.target.checked))}
+                />
+                Enabled
+              </label>
+              {isDraftNew && (
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={readOnly}
+                  onClick={() => onChange(removeDraftPeer(draft, index))}
+                >
+                  Remove from draft
+                </button>
+              )}
+            </fieldset>
+          );
+        })}
+        <button
+          type="button"
+          className="button secondary small"
+          disabled={readOnly}
+          onClick={() => onChange(addDraftPeer(draft))}
+        >
+          Add peer
+        </button>
+        <p className="muted">To delete a saved peer from the node, use the Ops tab.</p>
       </div>
     );
   }
@@ -842,6 +868,42 @@ function updatePeer(draft: JsonObject, index: number, key: string, value: unknow
   return { ...draft, peers };
 }
 
+function addDraftPeer(draft: JsonObject): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  peers.push({
+    _draft_new: true,
+    peer_id: "",
+    client_name: "",
+    quic_peer: "",
+    socks_listen: "",
+    http_listen: "",
+    quic_connections: 1,
+    port_forwards: [],
+    enabled: true,
+  });
+  return { ...draft, peers };
+}
+
+function removeDraftPeer(draft: JsonObject, index: number): JsonObject {
+  const peers = Array.isArray(draft.peers) ? [...draft.peers] : [];
+  const peer = isObject(peers[index]) ? peers[index] : null;
+  if (!peer || peer._draft_new !== true) return draft;
+  peers.splice(index, 1);
+  return { ...draft, peers };
+}
+
+function stripDraftPeerMarkers(content: JsonObject): JsonObject {
+  if (!Array.isArray(content.peers)) return content;
+  return {
+    ...content,
+    peers: content.peers.map((raw) => {
+      if (!isObject(raw)) return raw;
+      const { _draft_new: _ignored, ...peer } = raw;
+      return peer;
+    }),
+  };
+}
+
 function updatePeerPortForward(
   draft: JsonObject,
   peerIndex: number,
@@ -877,11 +939,22 @@ function removePeerPortForward(draft: JsonObject, peerIndex: number, forwardInde
 }
 
 function validateConfig(role: string, draft: JsonObject): string {
-  if (role !== "server") return "";
-  const level = readPath(draft, ["connection", "compression", "level"]);
-  if (level === undefined) return "";
-  if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > 22) {
-    return "Compression level must be an integer between 1 and 22.";
+  if (role === "server") {
+    const level = readPath(draft, ["connection", "compression", "level"]);
+    if (level === undefined) return "";
+    if (typeof level !== "number" || !Number.isInteger(level) || level < 1 || level > 22) {
+      return "Compression level must be an integer between 1 and 22.";
+    }
+    return "";
+  }
+  if (role !== "client") return "";
+  const peers = Array.isArray(draft.peers) ? draft.peers.filter(isObject) : [];
+  const seen = new Set<string>();
+  for (const peer of peers) {
+    const peerId = typeof peer.peer_id === "string" ? peer.peer_id.trim() : "";
+    if (!peerId) return "Each peer requires a non-empty Peer ID.";
+    if (seen.has(peerId)) return `Duplicate Peer ID “${peerId}”.`;
+    seen.add(peerId);
   }
   return "";
 }

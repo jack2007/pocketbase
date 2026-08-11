@@ -252,6 +252,90 @@ describe("NodeDetail", () => {
     expect(screen.getByRole("button", { name: "Add port forward" })).toBeEnabled();
   });
 
+  it("adds a draft peer with editable peer ID and can remove it before save", async () => {
+    vi.mocked(api.getNodeConfig).mockResolvedValue({
+      ...serverConfig,
+      role: "client",
+      editor_draft: {
+        peers: [{
+          peer_id: "peer-a",
+          quic_peer: "edge.example:4433",
+          enabled: true,
+        }],
+      },
+      writable_paths: ["peers[].peer_id"],
+    });
+    vi.mocked(api.putNodeConfig).mockResolvedValue({
+      applied: { peers: [{ peer_id: "peer-a" }, { peer_id: "peer-b" }] },
+      ignored_fields: [],
+      revision_id: "rev-1",
+      admin_status: 200,
+    });
+    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+
+    expect(await screen.findByLabelText("Peer ID")).toHaveAttribute("readonly");
+    fireEvent.click(screen.getByRole("button", { name: "Add peer" }));
+
+    const peerIds = screen.getAllByLabelText("Peer ID");
+    expect(peerIds).toHaveLength(2);
+    expect(peerIds[0]).toHaveAttribute("readonly");
+    expect(peerIds[1]).not.toHaveAttribute("readonly");
+
+    fireEvent.change(peerIds[1], { target: { value: "peer-b" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(api.putNodeConfig).toHaveBeenCalledWith("server-sg-1", {
+        peers: [
+          expect.objectContaining({ peer_id: "peer-a" }),
+          expect.objectContaining({ peer_id: "peer-b" }),
+        ],
+      });
+    });
+    const saved = vi.mocked(api.putNodeConfig).mock.calls[0][1] as {
+      peers: Array<Record<string, unknown>>;
+    };
+    expect(saved.peers[1]._draft_new).toBeUndefined();
+  });
+
+  it("rejects saving a draft peer without peer ID", async () => {
+    vi.mocked(api.getNodeConfig).mockResolvedValue({
+      ...serverConfig,
+      role: "client",
+      editor_draft: { peers: [] },
+      writable_paths: ["peers[].peer_id"],
+    });
+    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add peer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/non-empty Peer ID/i);
+    expect(api.putNodeConfig).not.toHaveBeenCalled();
+  });
+
+  it("removes only draft peers from the Config form", async () => {
+    vi.mocked(api.getNodeConfig).mockResolvedValue({
+      ...serverConfig,
+      role: "client",
+      editor_draft: {
+        peers: [{ peer_id: "peer-a", enabled: true }],
+      },
+      writable_paths: ["peers[].peer_id"],
+    });
+    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
+    await screen.findByLabelText("Peer ID");
+    expect(screen.queryByRole("button", { name: "Remove from draft" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add peer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove from draft" }));
+
+    expect(screen.getAllByLabelText("Peer ID")).toHaveLength(1);
+    expect(screen.getByLabelText("Peer ID")).toHaveValue("peer-a");
+  });
+
   it("treats a 503 node_offline save response as offline and preserves the draft", async () => {
     vi.mocked(api.putNodeConfig).mockRejectedValue(Object.assign(new Error("node_offline"), {
       status: 503,
