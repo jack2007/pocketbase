@@ -1,5 +1,7 @@
 import {
   Activity,
+  ChevronDown,
+  ChevronRight,
   LayoutDashboard,
   Menu,
   Moon,
@@ -12,7 +14,8 @@ import {
   Workflow,
 } from "lucide-react";
 import { useTheme } from "next-themes";
-import { useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { CenterNode } from "@/pages/Nodes";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +46,9 @@ const NAV: { id: FleetPage; label: string; icon: typeof LayoutDashboard }[] = [
 interface AppShellProps {
   page: FleetPage;
   onNavigate: (page: FleetPage) => void;
+  nodes: CenterNode[];
+  selectedNodeId?: string;
+  onSelectNode: (node: CenterNode) => void;
   onlineCount: number;
   totalCount: number;
   refreshPaused: boolean;
@@ -57,6 +63,9 @@ interface AppShellProps {
 export function AppShell({
   page,
   onNavigate,
+  nodes,
+  selectedNodeId,
+  onSelectNode,
   onlineCount,
   totalCount,
   refreshPaused,
@@ -68,10 +77,25 @@ export function AppShell({
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [nodesExpanded, setNodesExpanded] = useState(true);
   const { theme, setTheme } = useTheme();
+
+  useEffect(() => {
+    if (page === "nodes" || selectedNodeId) setNodesExpanded(true);
+  }, [page, selectedNodeId]);
+
+  const sortedNodes = useMemo(
+    () => [...nodes].sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b), undefined, { sensitivity: "base" })),
+    [nodes],
+  );
 
   function navigate(next: FleetPage) {
     onNavigate(next);
+    setMobileOpen(false);
+  }
+
+  function selectNode(node: CenterNode) {
+    onSelectNode(node);
     setMobileOpen(false);
   }
 
@@ -79,6 +103,86 @@ export function AppShell({
     <nav className="flex flex-col gap-1" aria-label="Primary navigation">
       {NAV.map((item) => {
         const Icon = item.icon;
+        if (item.id === "nodes") {
+          const sectionActive = page === "nodes";
+          const listActive = sectionActive && !selectedNodeId;
+          return (
+            <div key={item.id} className="space-y-0.5">
+              <div className="flex items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 shrink-0"
+                  aria-label={nodesExpanded ? "Collapse nodes" : "Expand nodes"}
+                  aria-expanded={nodesExpanded}
+                  onClick={() => setNodesExpanded((value) => !value)}
+                >
+                  {nodesExpanded
+                    ? <ChevronDown className="size-4" />
+                    : <ChevronRight className="size-4" />}
+                </Button>
+                <Button
+                  variant={listActive ? "secondary" : "ghost"}
+                  className={cn(
+                    "h-8 min-w-0 flex-1 justify-start gap-2 px-2",
+                    sectionActive && "font-semibold",
+                  )}
+                  onClick={() => {
+                    setNodesExpanded(true);
+                    navigate("nodes");
+                  }}
+                >
+                  <Icon className="size-4 shrink-0" />
+                  <span className="truncate">{item.label}</span>
+                  {nodes.length > 0 && (
+                    <Badge variant="outline" className="ml-auto h-5 px-1.5 font-mono text-[10px]">
+                      {nodes.length}
+                    </Badge>
+                  )}
+                </Button>
+              </div>
+              {nodesExpanded && (
+                <ul className="ml-4 space-y-0.5 border-l pl-2" aria-label="Node tree">
+                  {sortedNodes.length === 0 ? (
+                    <li className="px-2 py-1.5 text-xs text-muted-foreground">No nodes yet</li>
+                  ) : (
+                    sortedNodes.map((node) => {
+                      const active = selectedNodeId === node.id;
+                      return (
+                        <li key={node.id}>
+                          <button
+                            type="button"
+                            title={`${nodeLabel(node)} (${node.node_key})`}
+                            className={cn(
+                              "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
+                              active
+                                ? "bg-secondary font-medium text-secondary-foreground"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+                            )}
+                            onClick={() => selectNode(node)}
+                          >
+                            <span
+                              className={cn(
+                                "size-1.5 shrink-0 rounded-full",
+                                node.online
+                                  ? "bg-emerald-500 shadow-[0_0_0_3px_rgba(16,185,129,0.18)]"
+                                  : "bg-muted-foreground/40",
+                              )}
+                              aria-hidden
+                            />
+                            <span className="min-w-0 flex-1 truncate">{nodeLabel(node)}</span>
+                          </button>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+              )}
+            </div>
+          );
+        }
+
         const active = page === item.id;
         return (
           <Button
@@ -97,7 +201,7 @@ export function AppShell({
 
   return (
     <div className="flex min-h-svh bg-background">
-      <aside className="sticky top-0 hidden h-svh w-56 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
+      <aside className="sticky top-0 hidden h-svh w-60 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground md:flex">
         <div className="flex items-center gap-2 border-b px-4 py-4">
           <div className="flex size-8 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
             R2
@@ -107,7 +211,7 @@ export function AppShell({
             <div className="mt-1 font-mono text-[10px] text-muted-foreground">center</div>
           </div>
         </div>
-        <div className="flex-1 p-3">{nav}</div>
+        <div className="flex-1 overflow-y-auto p-3">{nav}</div>
         <div className="border-t p-3">
           <Button variant="ghost" className="w-full justify-start" onClick={onSignOut}>
             Sign out
@@ -173,13 +277,17 @@ export function AppShell({
       </div>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-        <SheetContent side="left" className="w-64 p-0">
+        <SheetContent side="left" className="w-72 p-0">
           <SheetHeader className="border-b px-4 py-4 text-left">
             <SheetTitle>raypx2 center</SheetTitle>
           </SheetHeader>
-          <div className="p-3">{nav}</div>
+          <div className="overflow-y-auto p-3">{nav}</div>
         </SheetContent>
       </Sheet>
     </div>
   );
+}
+
+function nodeLabel(node: CenterNode) {
+  return node.name?.trim() || node.node_key;
 }

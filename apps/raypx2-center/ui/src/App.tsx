@@ -82,6 +82,12 @@ export default function App() {
           setPage(next);
           setSelectedNode(undefined);
         }}
+        nodes={nodes}
+        selectedNodeId={selectedNode?.id}
+        onSelectNode={(node) => {
+          setPage("nodes");
+          setSelectedNode(node);
+        }}
         onlineCount={onlineCount}
         totalCount={nodes.length}
         refreshPaused={refreshPaused}
