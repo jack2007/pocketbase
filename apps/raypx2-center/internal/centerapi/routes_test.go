@@ -69,6 +69,13 @@ func TestCenterRoutesRequireSuperuserAuth(t *testing.T) {
 			expected:       []string{`"data":{}`},
 		},
 		{
+			name:           "unauthenticated DELETE /api/center/nodes/{node_key}/peers/{peer_id}",
+			method:         http.MethodDelete,
+			url:            "/api/center/nodes/missing/peers/peer-a",
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
 			name:           "unauthenticated GET /api/center/templates",
 			method:         http.MethodGet,
 			url:            "/api/center/templates",
@@ -155,6 +162,7 @@ func bindCenterAPIRoutes(t testing.TB, _ *tests.TestApp, e *core.ServeEvent) {
 	center.DELETE("/nodes/{node_key}", api.HandleDeleteNode)
 	center.GET("/nodes/{node_key}/config", api.HandleGetNodeConfig)
 	center.PUT("/nodes/{node_key}/config", api.HandlePutNodeConfig)
+	center.DELETE("/nodes/{node_key}/peers/{peer_id}", api.HandleDeleteNodePeer)
 	center.GET("/templates", api.HandleListTemplates)
 	center.GET("/apply-jobs", api.HandleListApplyJobs)
 }

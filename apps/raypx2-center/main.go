@@ -45,6 +45,7 @@ func main() {
 		center.POST("/nodes/{node_key}/proxy", centerAPI.HandleProxy)
 		center.GET("/nodes/{node_key}/config", centerAPI.HandleGetNodeConfig)
 		center.PUT("/nodes/{node_key}/config", centerAPI.HandlePutNodeConfig)
+		center.DELETE("/nodes/{node_key}/peers/{peer_id}", centerAPI.HandleDeleteNodePeer)
 		center.GET("/templates", centerAPI.HandleListTemplates)
 		center.POST("/templates", centerAPI.HandleCreateTemplate)
 		center.PUT("/templates/{template_id}", centerAPI.HandleUpdateTemplate)

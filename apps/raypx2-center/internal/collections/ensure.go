@@ -1,8 +1,14 @@
 package collections
 
 import (
+	"slices"
+
 	"github.com/pocketbase/pocketbase/core"
 )
+
+var configRevisionSources = []string{
+	"pull", "template_apply", "manual_edit", "proxy_write", "peer_delete",
+}
 
 // EnsureCollections creates the private collections used by raypx2-center.
 func EnsureCollections(app core.App) error {
@@ -63,7 +69,7 @@ func EnsureCollections(app core.App) error {
 		collection.Fields.Add(
 			relation("node", nodes, true, false),
 			&core.SelectField{Name: "kind", Values: []string{"actual", "desired"}},
-			&core.SelectField{Name: "source", Values: []string{"pull", "template_apply", "manual_edit", "proxy_write"}},
+			&core.SelectField{Name: "source", Values: configRevisionSources},
 			&core.TextField{Name: "content_hash"},
 			&core.JSONField{Name: "content"},
 			&core.TextField{Name: "diff_summary"},
@@ -71,6 +77,9 @@ func EnsureCollections(app core.App) error {
 		)
 	})
 	if err != nil {
+		return err
+	}
+	if err := ensureSelectValues(app, configRevisions, "source", configRevisionSources); err != nil {
 		return err
 	}
 
@@ -153,6 +162,24 @@ func addAutodates(collection *core.Collection) bool {
 		changed = true
 	}
 	return changed
+}
+
+func ensureSelectValues(app core.App, collection *core.Collection, fieldName string, want []string) error {
+	field, ok := collection.Fields.GetByName(fieldName).(*core.SelectField)
+	if !ok || field == nil {
+		return nil
+	}
+	changed := false
+	for _, value := range want {
+		if !slices.Contains(field.Values, value) {
+			field.Values = append(field.Values, value)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return app.Save(collection)
 }
 
 func relation(name string, collection *core.Collection, required, cascade bool) *core.RelationField {

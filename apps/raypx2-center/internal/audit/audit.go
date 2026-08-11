@@ -14,6 +14,7 @@ const (
 	ActionNodeRotate       = "node.rotate_enroll"
 	ActionNodeRevoke       = "node.revoke"
 	ActionNodeConfigUpdate = "node.config.update"
+	ActionNodePeerDelete   = "node.peer.delete"
 	ActionTemplateCreate   = "template.create"
 	ActionTemplateUpdate   = "template.update"
 	ActionApplyJobCreate   = "apply_job.create"
