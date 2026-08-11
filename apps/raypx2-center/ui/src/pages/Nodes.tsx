@@ -1,5 +1,48 @@
 import { useState, type FormEvent } from "react";
+import { toast } from "sonner";
 import type { CreateNodeInput, CreateNodeResult } from "../api";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { StatusBadge } from "@/components/shared/StatusBadge";
+import { DataTableShell } from "@/components/shared/DataTableShell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { formatDate } from "@/lib/node-utils";
 
 export interface CenterNode {
   id: string;
@@ -24,8 +67,10 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [deletingKey, setDeletingKey] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<CenterNode>();
   const [error, setError] = useState("");
   const [secret, setSecret] = useState("");
+  const [role, setRole] = useState<CreateNodeInput["role"]>("unknown");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,9 +82,10 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
       const result = await onCreate({
         node_key: String(data.get("node_key") ?? "").trim(),
         name: String(data.get("name") ?? "").trim(),
-        role: String(data.get("role") ?? "unknown") as CreateNodeInput["role"],
+        role,
       });
       setSecret(result.enroll_secret);
+      toast.success("Node created");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to create node.");
     } finally {
@@ -47,14 +93,14 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
     }
   }
 
-  async function remove(node: CenterNode) {
-    if (!onDelete) return;
-    const label = node.name || node.node_key;
-    if (!window.confirm(`Delete node "${label}"? This cannot be undone.`)) return;
-    setDeletingKey(node.node_key);
+  async function confirmDelete() {
+    if (!onDelete || !pendingDelete) return;
+    setDeletingKey(pendingDelete.node_key);
     setError("");
     try {
-      await onDelete(node);
+      await onDelete(pendingDelete);
+      toast.success("Node deleted");
+      setPendingDelete(undefined);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to delete node.");
     } finally {
@@ -66,135 +112,167 @@ export function Nodes({ nodes, loading, onRefresh, onCreate, onDelete, onSelect 
     setDialogOpen(false);
     setSecret("");
     setError("");
+    setRole("unknown");
   }
 
   return (
     <section>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">Fleet</p>
-          <h2>Nodes</h2>
-          <p className="muted">Manage enrolled raypx2 instances.</p>
-        </div>
-        <div className="actions">
-          <button className="button secondary" onClick={onRefresh} disabled={loading}>
-            {loading ? "Refreshing…" : "Refresh"}
-          </button>
-          {onCreate && (
-            <button className="button" onClick={() => setDialogOpen(true)}>
-              Create node
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Fleet"
+        title="Nodes"
+        description="Manage enrolled raypx2 instances."
+        actions={
+          <>
+            <Button variant="outline" onClick={onRefresh} disabled={loading}>
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            {onCreate && <Button onClick={() => setDialogOpen(true)}>Create node</Button>}
+          </>
+        }
+      />
 
-      {error && !dialogOpen && <div className="alert" role="alert">{error}</div>}
+      {error && !dialogOpen && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
-      <div className="table-shell">
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Node key</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Health</th>
-              <th>Last seen</th>
-              {onDelete && <th>Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
+      <DataTableShell>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Node key</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Health</TableHead>
+              <TableHead>Last seen</TableHead>
+              {onDelete && <TableHead>Actions</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {!loading && nodes.length === 0 && (
-              <tr>
-                <td colSpan={onDelete ? 7 : 6} className="empty">No nodes yet. Create one to get started.</td>
-              </tr>
+              <TableRow>
+                <TableCell colSpan={onDelete ? 7 : 6} className="h-24 text-center text-muted-foreground">
+                  No nodes yet. Create one to get started.
+                </TableCell>
+              </TableRow>
             )}
             {nodes.map((node) => (
-              <tr key={node.id}>
-                <td className="strong">
-                  {onSelect
-                    ? <button className="node-link" onClick={() => onSelect(node)}>{node.name || "Unnamed node"}</button>
-                    : node.name || "Unnamed node"}
-                </td>
-                <td><code>{node.node_key}</code></td>
-                <td><span className="tag">{node.role}</span></td>
-                <td>
-                  <span className={`status ${node.online ? "online" : "offline"}`}>
-                    <span className="status-dot" />
-                    {node.online ? "Online" : "Offline"}
-                  </span>
-                </td>
-                <td>{node.health_status || "—"}</td>
-                <td>{formatDate(node.last_seen_at)}</td>
-                {onDelete && (
-                  <td>
+              <TableRow key={node.id}>
+                <TableCell className="font-medium">
+                  {onSelect ? (
                     <button
-                      className="button danger small"
+                      type="button"
+                      className="underline decoration-muted-foreground/50 underline-offset-4 hover:text-foreground"
+                      onClick={() => onSelect(node)}
+                    >
+                      {node.name || "Unnamed node"}
+                    </button>
+                  ) : (
+                    node.name || "Unnamed node"
+                  )}
+                </TableCell>
+                <TableCell><code className="text-xs">{node.node_key}</code></TableCell>
+                <TableCell><Badge variant="secondary">{node.role}</Badge></TableCell>
+                <TableCell><StatusBadge online={node.online} /></TableCell>
+                <TableCell>{node.health_status || "—"}</TableCell>
+                <TableCell>{formatDate(node.last_seen_at)}</TableCell>
+                {onDelete && (
+                  <TableCell>
+                    <Button
+                      variant="destructive"
+                      size="sm"
                       disabled={deletingKey === node.node_key}
-                      onClick={() => void remove(node)}
+                      onClick={() => setPendingDelete(node)}
                     >
                       {deletingKey === node.node_key ? "Deleting…" : "Delete"}
-                    </button>
-                  </td>
+                    </Button>
+                  </TableCell>
                 )}
-              </tr>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </DataTableShell>
 
-      {dialogOpen && (
-        <div className="dialog-backdrop" role="presentation">
-          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="create-node-title">
-            {secret ? (
-              <>
-                <p className="eyebrow">Node created</p>
-                <h3 id="create-node-title">Save the enrollment secret</h3>
-                <p className="muted">This secret is shown only once. Store it before closing.</p>
-                <div className="secret"><code>{secret}</code></div>
-                <button className="button full" onClick={() => navigator.clipboard?.writeText(secret)}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => !open && closeDialog()}>
+        <DialogContent>
+          {secret ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Save the enrollment secret</DialogTitle>
+                <DialogDescription>
+                  This secret is shown only once. Store it before closing.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 font-mono text-sm break-all">
+                {secret}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => void navigator.clipboard?.writeText(secret)}>
                   Copy secret
-                </button>
-                <button className="button secondary full" onClick={closeDialog}>Done</button>
-              </>
-            ) : (
-              <form onSubmit={submit}>
-                <p className="eyebrow">Enrollment</p>
-                <h3 id="create-node-title">Create node</h3>
-                <label>
-                  Name
-                  <input name="name" placeholder="Singapore edge" autoFocus />
-                </label>
-                <label>
-                  Node key <span className="optional">(optional)</span>
-                  <input name="node_key" placeholder="Generated when empty" />
-                </label>
-                <label>
-                  Role
-                  <select name="role" defaultValue="unknown">
-                    <option value="unknown">Unknown</option>
-                    <option value="client">Client</option>
-                    <option value="server">Server</option>
-                  </select>
-                </label>
-                {error && <p className="form-error">{error}</p>}
-                <div className="dialog-actions">
-                  <button type="button" className="button secondary" onClick={closeDialog}>Cancel</button>
-                  <button className="button" disabled={submitting}>
-                    {submitting ? "Creating…" : "Create node"}
-                  </button>
+                </Button>
+                <Button onClick={closeDialog}>Done</Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <form onSubmit={submit}>
+              <DialogHeader>
+                <DialogTitle>Create node</DialogTitle>
+                <DialogDescription>Issue enrollment credentials for a new agent.</DialogDescription>
+              </DialogHeader>
+              <div className="mt-4 space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Name</Label>
+                  <Input id="name" name="name" placeholder="Singapore edge" autoFocus />
                 </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+                <div className="space-y-2">
+                  <Label htmlFor="node_key">Node key <span className="text-muted-foreground">(optional)</span></Label>
+                  <Input id="node_key" name="node_key" placeholder="Generated when empty" />
+                </div>
+                <div className="space-y-2">
+                  <Label>Role</Label>
+                  <Select value={role} onValueChange={(value) => setRole(value as CreateNodeInput["role"])}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unknown">Unknown</SelectItem>
+                      <SelectItem value="client">Client</SelectItem>
+                      <SelectItem value="server">Server</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+              </div>
+              <DialogFooter className="mt-6">
+                <Button type="button" variant="outline" onClick={closeDialog}>Cancel</Button>
+                <Button disabled={submitting}>{submitting ? "Creating…" : "Create node"}</Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(undefined)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete node?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete node &quot;{pendingDelete?.name || pendingDelete?.node_key}&quot;? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDelete()}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
-}
-
-function formatDate(value?: string) {
-  if (!value) return "Never";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
 }

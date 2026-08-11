@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   createTemplate,
   deleteTemplate,
@@ -6,6 +7,40 @@ import {
   updateTemplate,
   type ConfigTemplate,
 } from "../api";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { DataTableShell } from "@/components/shared/DataTableShell";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 
 const serverExample = JSON.stringify({
   allow_targets: ["10.0.0.0/8"],
@@ -21,6 +56,7 @@ export function Templates() {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<ConfigTemplate>();
 
   async function refresh() {
     try {
@@ -49,6 +85,7 @@ export function Templates() {
       const input = { name, target_role: role, body: parsed, notes };
       if (editing) await updateTemplate(editing.id, input);
       else await createTemplate(input);
+      toast.success(editing ? "Template version saved" : "Template created");
       edit();
       await refresh();
     } catch (cause) {
@@ -58,10 +95,12 @@ export function Templates() {
     }
   }
 
-  async function remove(template: ConfigTemplate) {
-    if (!window.confirm(`Delete template "${template.name}"?`)) return;
+  async function confirmDelete() {
+    if (!pendingDelete) return;
     try {
-      await deleteTemplate(template.id);
+      await deleteTemplate(pendingDelete.id);
+      toast.success("Template deleted");
+      setPendingDelete(undefined);
       await refresh();
     } catch (cause) {
       setError(message(cause));
@@ -70,44 +109,102 @@ export function Templates() {
 
   return (
     <section>
-      <div className="page-heading">
-        <div><p className="eyebrow">Configuration</p><h2>Templates</h2></div>
-        <button className="button secondary" onClick={() => edit()}>New template</button>
-      </div>
-      {error && <div className="alert" role="alert">{error}</div>}
-      <div className="config-layout">
-        <div className="table-shell">
-          <table>
-            <thead><tr><th>Name</th><th>Role</th><th>Version</th><th>Actions</th></tr></thead>
-            <tbody>
-              {templates.length === 0 && <tr><td className="empty" colSpan={4}>No templates yet.</td></tr>}
+      <PageHeader
+        eyebrow="Configuration"
+        title="Templates"
+        actions={<Button variant="outline" onClick={() => edit()}>New template</Button>}
+      />
+      {error && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <DataTableShell>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Version</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {templates.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                    No templates yet.
+                  </TableCell>
+                </TableRow>
+              )}
               {templates.map((template) => (
-                <tr key={template.id}>
-                  <td className="strong">{template.name}</td>
-                  <td><span className="tag">{template.target_role}</span></td>
-                  <td>v{template.version}</td>
-                  <td>
-                    <button className="button secondary small" onClick={() => edit(template)}>Edit</button>{" "}
-                    <button className="button secondary small" onClick={() => void remove(template)}>Delete</button>
-                  </td>
-                </tr>
+                <TableRow key={template.id}>
+                  <TableCell className="font-medium">{template.name}</TableCell>
+                  <TableCell><Badge variant="secondary">{template.target_role}</Badge></TableCell>
+                  <TableCell>v{template.version}</TableCell>
+                  <TableCell className="space-x-2">
+                    <Button variant="outline" size="sm" onClick={() => edit(template)}>Edit</Button>
+                    <Button variant="outline" size="sm" onClick={() => setPendingDelete(template)}>Delete</Button>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="panel template-editor">
-          <h3>{editing ? `Edit ${editing.name}` : "New template"}</h3>
-          <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label>Target role<select value={role} onChange={(event) => setRole(event.target.value as "client" | "server")}>
-            <option value="server">Server</option><option value="client">Client</option>
-          </select></label>
-          <label>Template body<textarea className="code-input" value={body} onChange={(event) => setBody(event.target.value)} /></label>
-          <label>Notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-          <button className="button" disabled={saving || !name.trim()} onClick={() => void save()}>
-            {saving ? "Saving…" : editing ? "Save new version" : "Create template"}
-          </button>
-        </div>
+            </TableBody>
+          </Table>
+        </DataTableShell>
+        <Card>
+          <CardHeader>
+            <CardTitle>{editing ? `Edit ${editing.name}` : "New template"}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="template-name">Name</Label>
+              <Input id="template-name" value={name} onChange={(event) => setName(event.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Target role</Label>
+              <Select value={role} onValueChange={(value) => setRole(value as "client" | "server")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="server">Server</SelectItem>
+                  <SelectItem value="client">Client</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="template-body">Template body</Label>
+              <Textarea
+                id="template-body"
+                className="min-h-48 font-mono text-xs"
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="template-notes">Notes</Label>
+              <Textarea id="template-notes" value={notes} onChange={(event) => setNotes(event.target.value)} />
+            </div>
+            <Button disabled={saving || !name.trim()} onClick={() => void save()}>
+              {saving ? "Saving…" : editing ? "Save new version" : "Create template"}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
+
+      <AlertDialog open={Boolean(pendingDelete)} onOpenChange={(open) => !open && setPendingDelete(undefined)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete template &quot;{pendingDelete?.name}&quot;?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void confirmDelete()}>Delete</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </section>
   );
 }

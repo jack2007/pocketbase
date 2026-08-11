@@ -1,23 +1,25 @@
 import { useCallback, useEffect, useState } from "react";
 import { createNode, deleteNode, listNodes, login, logout, pb, type CreateNodeInput } from "./api";
-import { Login } from "./pages/Login";
+import { AppShell, type FleetPage } from "./components/layout/AppShell";
+import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import { ApplyJobs } from "./pages/ApplyJobs";
-import { NodeDetail } from "./pages/NodeDetail";
+import { Login } from "./pages/Login";
+import { NodeDetail } from "./pages/node-detail/NodeDetail";
 import { Nodes, type CenterNode } from "./pages/Nodes";
 import { Overview } from "./pages/Overview";
 import { Templates } from "./pages/Templates";
-
-type Page = "overview" | "nodes" | "templates" | "apply-jobs";
 
 const REFRESH_INTERVAL_MS = 10_000;
 
 export default function App() {
   const [authenticated, setAuthenticated] = useState(pb.authStore.isValid);
-  const [page, setPage] = useState<Page>("overview");
+  const [page, setPage] = useState<FleetPage>("overview");
   const [nodes, setNodes] = useState<CenterNode[]>([]);
   const [selectedNode, setSelectedNode] = useState<CenterNode>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [refreshPaused, setRefreshPaused] = useState(false);
 
   useEffect(() => pb.authStore.onChange(() => setAuthenticated(pb.authStore.isValid)), []);
 
@@ -40,11 +42,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!authenticated || refreshPaused) return;
     void refresh();
     const timer = window.setInterval(() => void refresh({ quiet: true }), REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [authenticated, refresh]);
+  }, [authenticated, refresh, refreshPaused]);
 
   async function handleCreate(input: CreateNodeInput) {
     const result = await createNode(input);
@@ -58,40 +60,37 @@ export default function App() {
   }
 
   if (!authenticated) {
-    return <Login onLogin={login} />;
+    return (
+      <TooltipProvider>
+        <Login onLogin={login} />
+        <Toaster />
+      </TooltipProvider>
+    );
   }
 
   const detailNode = selectedNode
     ? nodes.find((node) => node.id === selectedNode.id) ?? selectedNode
     : undefined;
 
+  const onlineCount = nodes.filter((node) => node.online).length;
+
   return (
-    <div className="app-shell">
-      <aside>
-        <div>
-          <div className="brand">
-            <div className="brand-mark small">R2</div>
-            <div><strong>raypx2</strong><span>center</span></div>
-          </div>
-          <nav aria-label="Primary navigation">
-            <button className={page === "overview" ? "active" : ""} onClick={() => setPage("overview")}>
-              <span>◫</span> Overview
-            </button>
-            <button className={page === "nodes" ? "active" : ""} onClick={() => { setPage("nodes"); setSelectedNode(undefined); }}>
-              <span>⌘</span> Nodes
-            </button>
-            <button className={page === "templates" ? "active" : ""} onClick={() => { setPage("templates"); setSelectedNode(undefined); }}>
-              <span>◇</span> Templates
-            </button>
-            <button className={page === "apply-jobs" ? "active" : ""} onClick={() => { setPage("apply-jobs"); setSelectedNode(undefined); }}>
-              <span>↯</span> Apply Jobs
-            </button>
-          </nav>
-        </div>
-        <button className="sign-out" onClick={logout}>Sign out</button>
-      </aside>
-      <main className="content">
-        {error && <div className="alert">{error}</div>}
+    <TooltipProvider>
+      <AppShell
+        page={page}
+        onNavigate={(next) => {
+          setPage(next);
+          setSelectedNode(undefined);
+        }}
+        onlineCount={onlineCount}
+        totalCount={nodes.length}
+        refreshPaused={refreshPaused}
+        onToggleRefresh={() => setRefreshPaused((value) => !value)}
+        onRefreshNow={() => void refresh()}
+        refreshing={loading}
+        error={error}
+        onSignOut={logout}
+      >
         {page === "overview" ? (
           <Overview nodes={nodes} />
         ) : page === "templates" ? (
@@ -113,7 +112,8 @@ export default function App() {
             onSelect={setSelectedNode}
           />
         )}
-      </main>
-    </div>
+      </AppShell>
+      <Toaster />
+    </TooltipProvider>
   );
 }

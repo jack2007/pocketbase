@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { NodeDetail } from "./NodeDetail";
@@ -58,15 +58,15 @@ describe("NodeDetail", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the offline write notice on Ops", () => {
+  it("shows the offline write notice on Peers", () => {
     render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
 
     expect(screen.getByText("Writes are disabled while this node is offline.")).toBeInTheDocument();
   });
 
-  it("deletes a client peer from Ops after confirmation", async () => {
+  it("deletes a client peer from Peers after confirmation", async () => {
     const node: CenterNode = {
       id: "node-c1",
       node_key: "client-1",
@@ -74,12 +74,10 @@ describe("NodeDetail", () => {
       role: "client",
       online: true,
     };
-    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
-      if (path === "/api/v1/health") return { status: "ok" };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, _method, path) => {
       if (path === "/api/v1/peers") {
         return { peers: [{ peer_id: "peer-a", state: "connected", address: "edge:443" }] };
       }
-      if (String(path).includes("/connections")) return { connections: [] };
       return {};
     });
     vi.mocked(api.deleteNodePeer).mockResolvedValue({
@@ -87,15 +85,14 @@ describe("NodeDetail", () => {
       revision_id: "rev-del",
       admin_status: 200,
     });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<NodeDetail node={node} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
     expect(await screen.findByText("peer-a")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
 
-    expect(confirm).toHaveBeenCalled();
     await waitFor(() => {
       expect(api.deleteNodePeer).toHaveBeenCalledWith("client-1", "peer-a");
     });
@@ -109,41 +106,40 @@ describe("NodeDetail", () => {
       role: "client",
       online: true,
     };
-    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, _method, path) => {
       if (path === "/api/v1/peers") {
         return { peers: [{ peer_id: "peer-a", state: "connected" }] };
       }
-      if (String(path).includes("/connections")) return { connections: [] };
       return {};
     });
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<NodeDetail node={node} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
     await screen.findByText("peer-a");
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
 
-    expect(confirm).toHaveBeenCalled();
     expect(api.deleteNodePeer).not.toHaveBeenCalled();
   });
 
-  it("does not show Server ACL editor on Ops tab", async () => {
+  it("shows Server ACL editor on ACL tab only", async () => {
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
-
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
     expect(screen.queryByRole("button", { name: /save acl/i })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/allow targets/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "ACL" }));
+    expect(await screen.findByRole("button", { name: /save acl/i })).toBeInTheDocument();
+    expect(screen.getByLabelText(/allow targets/i)).toBeInTheDocument();
   });
 
-  it("loads role-specific operations through the node proxy", async () => {
+  it("loads server connections through the node proxy", async () => {
     const node = { ...offlineServer, online: true };
     render(<NodeDetail node={node} onBack={() => undefined} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
 
     await waitFor(() => {
-      expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/health");
       expect(api.proxyNode).toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/connections");
     });
     expect(api.proxyNode).not.toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/config");
@@ -163,7 +159,11 @@ describe("NodeDetail", () => {
 
   it("keeps applied config and shows refresh warning when post-save GET fails", async () => {
     vi.mocked(api.putNodeConfig).mockResolvedValue({
-      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+      applied: {
+        allow_targets: ["127.0.0.0/8"],
+        deny_targets: [],
+        connection: { compression: { level: 4 } },
+      },
       ignored_fields: ["listen"],
       revision_id: "rev1",
       admin_status: 200,
@@ -174,20 +174,19 @@ describe("NodeDetail", () => {
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    await screen.findByLabelText("Allow targets");
+    const level = await screen.findByLabelText("Compression level");
+    fireEvent.change(level, { target: { value: "4" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
     expect(screen.getByText("listen")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent(/metadata could not be refreshed/i);
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/save failed/i);
-    expect(screen.getByRole("alert")).not.toHaveTextContent(/operation failed/i);
-    expect(screen.getByLabelText("Allow targets")).toHaveValue("127.0.0.0/8");
+    expect(screen.getByLabelText("Compression level")).toHaveValue(4);
   });
 
   it("re-fetches config metadata and revisions after saving", async () => {
     const put = vi.mocked(api.putNodeConfig).mockResolvedValue({
-      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [], connection: { compression: { level: 3 } } },
       ignored_fields: ["listen"],
       revision_id: "rev1",
       admin_status: 200,
@@ -203,7 +202,11 @@ describe("NodeDetail", () => {
             pending_fields: [],
           },
         },
-        editor_draft: { allow_targets: ["127.0.0.0/8"], deny_targets: [] },
+        editor_draft: {
+          allow_targets: ["127.0.0.0/8"],
+          deny_targets: [],
+          connection: { compression: { level: 3 } },
+        },
         recent_revisions: [{
           id: "rev1",
           kind: "desired",
@@ -227,14 +230,12 @@ describe("NodeDetail", () => {
     expect(screen.getByText("listen")).toBeInTheDocument();
     expect(screen.getByText("Restart required: No")).toBeInTheDocument();
     expect(screen.getByText("manual_edit")).toBeInTheDocument();
-    expect(screen.queryByText("View JSON")).not.toBeInTheDocument();
-    expect(screen.queryByRole("columnheader", { name: "Summary" })).not.toBeInTheDocument();
   });
 
   it("blocks switching to Form when JSON is invalid", async () => {
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    await screen.findByLabelText("Allow targets");
+    await screen.findByLabelText("Compression level");
 
     fireEvent.click(screen.getByRole("button", { name: "JSON" }));
     fireEvent.change(screen.getByLabelText("JSON configuration"), { target: { value: "{" } });
@@ -406,13 +407,13 @@ describe("NodeDetail", () => {
     }));
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    const allowTargets = await screen.findByLabelText("Allow targets");
-    fireEvent.change(allowTargets, { target: { value: "127.0.0.0/8" } });
+    const level = await screen.findByLabelText("Compression level");
+    fireEvent.change(level, { target: { value: "5" } });
 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/offline/i);
-    expect(screen.getByLabelText("Allow targets")).toHaveValue("127.0.0.0/8");
+    expect(screen.getByLabelText("Compression level")).toHaveValue(5);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
@@ -420,11 +421,11 @@ describe("NodeDetail", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    fireEvent.change(await screen.findByLabelText("Allow targets"), {
-      target: { value: "127.0.0.0/8" },
+    fireEvent.change(await screen.findByLabelText("Compression level"), {
+      target: { value: "5" },
     });
 
-    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
 
     expect(confirm).toHaveBeenCalled();
     expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
@@ -434,8 +435,8 @@ describe("NodeDetail", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    fireEvent.change(await screen.findByLabelText("Allow targets"), {
-      target: { value: "127.0.0.0/8" },
+    fireEvent.change(await screen.findByLabelText("Compression level"), {
+      target: { value: "5" },
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "Config" }));
@@ -545,12 +546,7 @@ describe("NodeDetail", () => {
       online: true,
     };
     render(<NodeDetail node={node} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Tunnels" }));
-
-    expect(
-      await screen.findByText('Tunnel inventory is not available for role "unknown".'),
-    ).toBeInTheDocument();
-    expect(api.proxyNode).not.toHaveBeenCalled();
+    expect(screen.queryByRole("tab", { name: "Tunnels" })).not.toBeInTheDocument();
   });
 });
 

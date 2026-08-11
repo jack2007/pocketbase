@@ -1,4 +1,9 @@
 import { useState, type FormEvent } from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 interface LoginProps {
   onLogin: (identity: string, password: string) => Promise<unknown>;
@@ -23,27 +28,52 @@ export function Login({ onLogin }: LoginProps) {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
-        <div className="brand-mark">R2</div>
-        <p className="eyebrow">raypx2 center</p>
-        <h1>Welcome back</h1>
-        <p className="muted">Sign in with a PocketBase superuser account.</p>
-        <form onSubmit={submit}>
-          <label>
-            Email
-            <input name="identity" type="email" autoComplete="username" required autoFocus />
-          </label>
-          <label>
-            Password
-            <input name="password" type="password" autoComplete="current-password" required />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="button full" disabled={submitting}>
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
-      </section>
+    <main className="flex min-h-svh items-center justify-center bg-muted/40 p-6">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-primary text-sm font-bold text-primary-foreground">
+            R2
+          </div>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            raypx2 center
+          </p>
+          <CardTitle>Welcome back</CardTitle>
+          <CardDescription>Sign in with a PocketBase superuser account.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={submit}>
+            <div className="space-y-2">
+              <Label htmlFor="identity">Email</Label>
+              <Input
+                id="identity"
+                name="identity"
+                type="email"
+                autoComplete="username"
+                required
+                autoFocus
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                required
+              />
+            </div>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            <Button className="w-full" disabled={submitting}>
+              {submitting ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Nodes, type CenterNode } from "./Nodes";
 
@@ -26,7 +26,6 @@ describe("Nodes", () => {
 
   it("calls onDelete after confirmation", async () => {
     const onDelete = vi.fn().mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const nodes: CenterNode[] = [
       {
         id: "node-1",
@@ -47,8 +46,9 @@ describe("Nodes", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(onDelete).toHaveBeenCalledWith(nodes[0]);
-    confirmSpy.mockRestore();
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    await waitFor(() => {
+      expect(onDelete).toHaveBeenCalledWith(nodes[0]);
+    });
   });
 });
