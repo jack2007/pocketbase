@@ -200,6 +200,19 @@ export function putNodeConfig(
   });
 }
 
+export interface DeleteNodePeerResult {
+  peer_id: string;
+  revision_id: string;
+  admin_status: number;
+}
+
+export function deleteNodePeer(nodeKey: string, peerId: string): Promise<DeleteNodePeerResult> {
+  return centerRequest(
+    `/api/center/nodes/${encodeURIComponent(nodeKey)}/peers/${encodeURIComponent(peerId)}`,
+    { method: "DELETE" },
+  );
+}
+
 async function centerRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
     ...init,

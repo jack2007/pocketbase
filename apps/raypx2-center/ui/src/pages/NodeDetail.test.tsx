@@ -8,6 +8,7 @@ vi.mock("../api", async () => {
   const actual = await vi.importActual<typeof import("../api")>("../api");
   return {
     ...actual,
+    deleteNodePeer: vi.fn(),
     getNodeConfig: vi.fn(),
     listAuditLogs: vi.fn().mockResolvedValue([]),
     putNodeConfig: vi.fn(),
@@ -63,6 +64,67 @@ describe("NodeDetail", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
 
     expect(screen.getByText("Writes are disabled while this node is offline.")).toBeInTheDocument();
+  });
+
+  it("deletes a client peer from Ops after confirmation", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
+      if (path === "/api/v1/health") return { status: "ok" };
+      if (path === "/api/v1/peers") {
+        return { peers: [{ peer_id: "peer-a", state: "connected", address: "edge:443" }] };
+      }
+      if (String(path).includes("/connections")) return { connections: [] };
+      return {};
+    });
+    vi.mocked(api.deleteNodePeer).mockResolvedValue({
+      peer_id: "peer-a",
+      revision_id: "rev-del",
+      admin_status: 200,
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    expect(await screen.findByText("peer-a")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(api.deleteNodePeer).toHaveBeenCalledWith("client-1", "peer-a");
+    });
+  });
+
+  it("does not delete a client peer when confirmation is cancelled", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
+      if (path === "/api/v1/peers") {
+        return { peers: [{ peer_id: "peer-a", state: "connected" }] };
+      }
+      if (String(path).includes("/connections")) return { connections: [] };
+      return {};
+    });
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Ops" }));
+    await screen.findByText("peer-a");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(confirm).toHaveBeenCalled();
+    expect(api.deleteNodePeer).not.toHaveBeenCalled();
   });
 
   it("does not show Server ACL editor on Ops tab", async () => {

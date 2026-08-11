@@ -33,7 +33,11 @@ Commit the updated `dist` files together with the source changes.
 Open a node → **Config**. Edit via **Form** or **JSON**, then Save.
 The center whitelists writable Admin fields, writes the node over the
 agent tunnel, and stores a `manual_edit` revision. Offline nodes are
-read-only. Peer deletion is not supported on this page.
+read-only. On client nodes, use **Add peer** in the Config form (enter a
+`peer_id`) to create peers; saving upserts and keeps peers omitted from
+the submitted list. To delete a saved peer from the node, open **Ops**
+and use **Delete** on the Client peers table
+(`DELETE /api/center/nodes/{node_key}/peers/{peer_id}`).
 
 ## Production HTTPS and WSS
 
@@ -76,6 +80,9 @@ in logs. The superuser-only node management endpoints are:
 - `POST /api/center/nodes/{node_key}/revoke`: marks enrollment revoked,
   invalidates sessions, and disconnects the current WebSocket with
   `bye {"reason":"revoked"}`.
+- `DELETE /api/center/nodes/{node_key}/peers/{peer_id}`: removes one
+  client peer by rewriting Admin config over the agent tunnel, then
+  stores a `peer_delete` revision and `node.peer.delete` audit entry.
 
 After rotation, update the agent with the new secret before restarting it.
 After revocation, enrollment remains blocked until an operator rotates the

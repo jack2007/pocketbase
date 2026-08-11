@@ -176,6 +176,7 @@ tbody tr:hover { background: #f6f8f4; }
 .json-view { overflow: auto; max-height: 360px; margin: 0; padding: 1rem; border-radius: 8px; color: #dbe5dc; background: #131a16; font: .76rem/1.55 "DM Mono", monospace; }
 .compact { border: 1px solid var(--line); box-shadow: none; }
 .compact th, .compact td { padding: .75rem .8rem; }
+.row-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 .acl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .acl-grid label { margin-top: 0; }
 .acl-grid textarea { min-height: 130px; resize: vertical; padding: .8rem .9rem; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: white; font-family: "DM Mono", monospace; }

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  deleteNodePeer,
   getNodeConfig,
   listAuditLogs,
   putNodeConfig,
@@ -551,6 +552,22 @@ function NodeOps({ node }: { node: CenterNode }) {
     }
   }
 
+  async function removePeer(peer: JsonObject) {
+    const peerId = itemId(peer);
+    if (!peerId || !node.online) return;
+    if (!window.confirm(`Delete peer "${peerId}" from this node? This cannot be undone.`)) return;
+    setWriting(true);
+    setError("");
+    try {
+      await deleteNodePeer(node.node_key, peerId);
+      await load();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setWriting(false);
+    }
+  }
+
   return (
     <div className="ops-stack">
       {!node.online && <div className="offline-notice">Writes are disabled while this node is offline.</div>}
@@ -574,13 +591,20 @@ function NodeOps({ node }: { node: CenterNode }) {
                       <td className="strong">{itemId(peer) || `Peer ${index + 1}`}</td>
                       <td>{display(peer.state ?? peer.enabled)}</td>
                       <td>{display(peer.address ?? peer.endpoint ?? peer.host)}</td>
-                      <td>
+                      <td className="row-actions">
                         <button
                           className="button secondary small"
                           disabled={!node.online || writing || !itemId(peer)}
                           onClick={() => void togglePeer(peer)}
                         >
                           {peer.enabled === false || peer.state === "disabled" ? "Enable" : "Disable"}
+                        </button>
+                        <button
+                          className="button secondary small"
+                          disabled={!node.online || writing || !itemId(peer)}
+                          onClick={() => void removePeer(peer)}
+                        >
+                          Delete
                         </button>
                       </td>
                     </tr>
