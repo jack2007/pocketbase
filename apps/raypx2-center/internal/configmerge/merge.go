@@ -137,6 +137,44 @@ func MergeServerConfig(actual, templateBody map[string]any) (map[string]any, err
 	return merged, nil
 }
 
+// ErrPeerNotFound is returned when RemoveClientPeer cannot find peer_id.
+var ErrPeerNotFound = errors.New("peer_not_found")
+
+// RemoveClientPeer returns a clone of actual with the named peer removed.
+func RemoveClientPeer(actual map[string]any, peerID string) (map[string]any, error) {
+	if strings.TrimSpace(peerID) == "" {
+		return nil, ErrPeerNotFound
+	}
+	merged, err := cloneMap(actual)
+	if err != nil {
+		return nil, err
+	}
+	rawPeers, ok := merged["peers"].([]any)
+	if !ok {
+		return nil, ErrPeerNotFound
+	}
+	out := make([]any, 0, len(rawPeers))
+	found := false
+	for _, raw := range rawPeers {
+		peer, ok := raw.(map[string]any)
+		if !ok {
+			out = append(out, raw)
+			continue
+		}
+		id, _ := peer["peer_id"].(string)
+		if id == peerID {
+			found = true
+			continue
+		}
+		out = append(out, peer)
+	}
+	if !found {
+		return nil, ErrPeerNotFound
+	}
+	merged["peers"] = out
+	return merged, nil
+}
+
 // MergeClientPeers upserts whitelisted peer fields by peer_id and preserves
 // actual peers omitted from the template.
 func MergeClientPeers(actual, templateBody map[string]any) (map[string]any, error) {

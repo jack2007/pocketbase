@@ -1,6 +1,7 @@
 package configmerge
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -107,6 +108,50 @@ func TestMergeClientPeersRejectsUnknownAndMissingPeerID(t *testing.T) {
 		if _, err := MergeClientPeers(actual, template); err == nil {
 			t.Fatalf("expected rejection for %#v", template)
 		}
+	}
+}
+
+func TestRemoveClientPeerRemovesMatchingPeer(t *testing.T) {
+	t.Parallel()
+	actual := map[string]any{
+		"version": float64(1),
+		"peers": []any{
+			map[string]any{"peer_id": "peer-a", "quic_peer": "a:443"},
+			map[string]any{"peer_id": "peer-b", "quic_peer": "b:443"},
+		},
+	}
+	desired, err := RemoveClientPeer(actual, "peer-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers := desired["peers"].([]any)
+	if len(peers) != 1 {
+		t.Fatalf("peers = %#v", peers)
+	}
+	if peers[0].(map[string]any)["peer_id"] != "peer-b" {
+		t.Fatalf("remaining peer = %#v", peers[0])
+	}
+	if desired["version"] != float64(1) {
+		t.Fatalf("version lost: %#v", desired)
+	}
+	if len(actual["peers"].([]any)) != 2 {
+		t.Fatal("RemoveClientPeer mutated actual")
+	}
+}
+
+func TestRemoveClientPeerMissingOrEmpty(t *testing.T) {
+	t.Parallel()
+	actual := map[string]any{
+		"peers": []any{map[string]any{"peer_id": "peer-a"}},
+	}
+	if _, err := RemoveClientPeer(actual, "missing"); !errors.Is(err, ErrPeerNotFound) {
+		t.Fatalf("missing peer err = %v", err)
+	}
+	if _, err := RemoveClientPeer(actual, "  "); !errors.Is(err, ErrPeerNotFound) {
+		t.Fatalf("empty peer err = %v", err)
+	}
+	if _, err := RemoveClientPeer(map[string]any{}, "peer-a"); !errors.Is(err, ErrPeerNotFound) {
+		t.Fatalf("no peers err = %v", err)
 	}
 }
 
