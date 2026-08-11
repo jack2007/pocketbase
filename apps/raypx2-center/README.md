@@ -84,6 +84,10 @@ secret, which reactivates enrollment.
 The Nodes console auto-refreshes every 10 seconds, exposes Delete on each row,
 and shows Health from the merged `health_status` field on the Overview tab.
 
+Node detail includes a read-only **Tunnels** tab that proxies
+`GET /api/v1/tunnels` (client) or `GET /api/v1/server/tunnels` (server) while
+the node is online.
+
 ## M1 manual smoke check
 
 1. Run `npm test && npm run build` in `ui/` when changing the SPA.
