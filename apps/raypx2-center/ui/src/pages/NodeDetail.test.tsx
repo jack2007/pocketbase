@@ -548,6 +548,155 @@ describe("NodeDetail", () => {
     render(<NodeDetail node={node} onBack={() => undefined} />);
     expect(screen.queryByRole("tab", { name: "Tunnels" })).not.toBeInTheDocument();
   });
+
+  it("shows admin-aligned client peer columns", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, _method, path) => {
+      if (path === "/api/v1/peers") {
+        return {
+          peers: [{
+            peer_id: "peer-a",
+            state: "connected",
+            enabled: true,
+            quic_peer: "edge:443",
+            socks_listen: "127.0.0.1:1080",
+            http_listen: "127.0.0.1:8080",
+            connection_count: 2,
+            connected_connections: 1,
+            active_streams: 3,
+            total_streams: 9,
+            reconnects: 4,
+            last_error: "timeout",
+          }],
+        };
+      }
+      return {};
+    });
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
+    expect(await screen.findByText("peer-a")).toBeInTheDocument();
+
+    for (const header of [
+      "socks_listen",
+      "http_listen",
+      "connection_count",
+      "connected_connections",
+      "active_streams",
+      "total_streams",
+      "reconnects",
+      "last_error",
+    ]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
+    }
+    expect(screen.getByText("timeout")).toBeInTheDocument();
+    expect(screen.getByText("127.0.0.1:1080")).toBeInTheDocument();
+  });
+
+  it("fills connection fields when editing a peer and saves connection payload", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path, body) => {
+      if (method === "GET" && path === "/api/v1/peers") {
+        return {
+          peers: [{
+            peer_id: "peer-a",
+            state: "connected",
+            enabled: true,
+            quic_peer: "edge:443",
+            socks_listen: "127.0.0.1:1080",
+            http_listen: "127.0.0.1:8080",
+            proto_connections: 2,
+            paths: [],
+            port_forwards: [],
+            connection_config: {
+              desired: { encryption: "disabled", compression: { mode: "enabled", level: 5 } },
+              applied: { encryption: "enabled", compression: { mode: "disabled", level: 1 } },
+              restart_required: true,
+            },
+          }],
+        };
+      }
+      if (method === "PUT" && path === "/api/v1/peers/peer-a") {
+        return body ?? {};
+      }
+      return {};
+    });
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
+    await screen.findByText("peer-a");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByLabelText("Desired encryption")).toHaveValue("disabled");
+    expect(screen.getByLabelText("Desired compression mode")).toHaveValue("enabled");
+    expect(screen.getByLabelText("Desired compression level")).toHaveValue(5);
+    expect(screen.getByLabelText("Applied encryption")).toHaveTextContent("enabled");
+    expect(screen.getByLabelText("Applied compression mode")).toHaveTextContent("disabled");
+    expect(screen.getByLabelText("Applied compression level")).toHaveTextContent("1");
+    expect(screen.getByLabelText("Restart required")).toHaveTextContent("true");
+
+    fireEvent.change(screen.getByLabelText("Desired compression level"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create / Save" }));
+
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        "client-1",
+        "PUT",
+        "/api/v1/peers/peer-a",
+        expect.objectContaining({
+          peer_id: "peer-a",
+          quic_connections: 2,
+          connection: {
+            encryption: "disabled",
+            compression: { mode: "enabled", level: 6 },
+          },
+        }),
+      );
+    });
+  });
+
+  it("rejects invalid compression level before calling the peer API", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, _method, path) => {
+      if (path === "/api/v1/peers") {
+        return { peers: [] };
+      }
+      return {};
+    });
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Create Peer" }));
+    fireEvent.change(screen.getByLabelText("peer_id"), { target: { value: "peer-new" } });
+    fireEvent.change(screen.getByLabelText("Desired compression level"), { target: { value: "99" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create / Save" }));
+
+    expect(await screen.findByText(/Compression level must be an integer from 1 to 22/i)).toBeInTheDocument();
+    expect(api.proxyNode).not.toHaveBeenCalledWith(
+      "client-1",
+      "POST",
+      "/api/v1/peers",
+      expect.anything(),
+    );
+  });
 });
 
 describe("center config API", () => {

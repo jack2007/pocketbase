@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { display, errorMessage, itemId, itemsFrom, type JsonObject } from "@/lib/node-utils";
+import { buildPeerSavePayload, emptyPeerForm, peerToForm } from "./peer-form-helpers";
 
 export function PeersTab({ node }: { node: CenterNode }) {
   const [peers, setPeers] = useState<JsonObject[]>([]);
@@ -133,16 +134,7 @@ export function PeersTab({ node }: { node: CenterNode }) {
 
   function openEdit(peer: JsonObject) {
     setEditing(peer);
-    setForm({
-      peer_id: String(peer.peer_id ?? ""),
-      quic_peer: String(peer.quic_peer ?? peer.address ?? ""),
-      connections: String(peer.quic_connections ?? peer.connections ?? 1),
-      socks_listen: String(peer.socks_listen ?? "127.0.0.1:1080"),
-      http_listen: String(peer.http_listen ?? "127.0.0.1:8080"),
-      enabled: peer.enabled !== false && peer.state !== "disabled",
-      paths: JSON.stringify(peer.paths ?? [], null, 2),
-      port_forwards: JSON.stringify(peer.port_forwards ?? [], null, 2),
-    });
+    setForm(peerToForm(peer));
     setEditorOpen(true);
   }
 
@@ -151,22 +143,13 @@ export function PeersTab({ node }: { node: CenterNode }) {
     setWriting(true);
     setError("");
     try {
-      const payload = {
-        peer_id: form.peer_id.trim(),
-        quic_peer: form.quic_peer.trim(),
-        quic_connections: Number(form.connections) || 1,
-        socks_listen: form.socks_listen.trim(),
-        http_listen: form.http_listen.trim(),
-        enabled: form.enabled,
-        paths: JSON.parse(form.paths || "[]"),
-        port_forwards: JSON.parse(form.port_forwards || "[]"),
-      };
+      const payload = buildPeerSavePayload(form);
       if (!payload.peer_id) throw new Error("peer_id is required.");
       if (editing) {
         await proxyNode(
           node.node_key,
           "PUT",
-          `/api/v1/peers/${encodeURIComponent(payload.peer_id)}`,
+          `/api/v1/peers/${encodeURIComponent(String(payload.peer_id))}`,
           payload,
         );
       } else {
@@ -223,6 +206,14 @@ export function PeersTab({ node }: { node: CenterNode }) {
                       <TableHead>state</TableHead>
                       <TableHead>enabled</TableHead>
                       <TableHead>quic_peer</TableHead>
+                      <TableHead>socks_listen</TableHead>
+                      <TableHead>http_listen</TableHead>
+                      <TableHead>connection_count</TableHead>
+                      <TableHead>connected_connections</TableHead>
+                      <TableHead>active_streams</TableHead>
+                      <TableHead>total_streams</TableHead>
+                      <TableHead>reconnects</TableHead>
+                      <TableHead>last_error</TableHead>
                       <TableHead>actions</TableHead>
                     </>
                   ) : (
@@ -239,7 +230,7 @@ export function PeersTab({ node }: { node: CenterNode }) {
               <TableBody>
                 {peers.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={5} className="h-20 text-center text-muted-foreground">
+                    <TableCell colSpan={node.role === "client" ? 13 : 5} className="h-20 text-center text-muted-foreground">
                       {loading ? "Loading…" : "No items returned."}
                     </TableCell>
                   </TableRow>
@@ -251,6 +242,14 @@ export function PeersTab({ node }: { node: CenterNode }) {
                       <TableCell>{display(peer.state)}</TableCell>
                       <TableCell>{display(peer.enabled)}</TableCell>
                       <TableCell>{display(peer.quic_peer ?? peer.address ?? peer.endpoint)}</TableCell>
+                      <TableCell>{display(peer.socks_listen)}</TableCell>
+                      <TableCell>{display(peer.http_listen)}</TableCell>
+                      <TableCell>{display(peer.connection_count)}</TableCell>
+                      <TableCell>{display(peer.connected_connections)}</TableCell>
+                      <TableCell>{display(peer.active_streams)}</TableCell>
+                      <TableCell>{display(peer.total_streams)}</TableCell>
+                      <TableCell>{display(peer.reconnects)}</TableCell>
+                      <TableCell>{display(peer.last_error)}</TableCell>
                       <TableCell className="space-x-2">
                         <Button
                           variant="outline"
@@ -300,21 +299,24 @@ export function PeersTab({ node }: { node: CenterNode }) {
             <SheetTitle>{editing ? "Edit Peer" : "Create Peer"}</SheetTitle>
           </SheetHeader>
           <div className="grid gap-4 px-4 py-2">
-            <Field label="peer_id">
+            <Field label="peer_id" htmlFor="peer-id">
               <Input
+                id="peer-id"
                 value={form.peer_id}
                 disabled={Boolean(editing)}
                 onChange={(event) => setForm({ ...form, peer_id: event.target.value })}
               />
             </Field>
-            <Field label="quic_peer addresses">
+            <Field label="quic_peer addresses" htmlFor="peer-quic-peer">
               <Input
+                id="peer-quic-peer"
                 value={form.quic_peer}
                 onChange={(event) => setForm({ ...form, quic_peer: event.target.value })}
               />
             </Field>
-            <Field label="Connections">
+            <Field label="Connections" htmlFor="peer-connections">
               <Input
+                id="peer-connections"
                 type="number"
                 min={1}
                 max={128}
@@ -322,14 +324,16 @@ export function PeersTab({ node }: { node: CenterNode }) {
                 onChange={(event) => setForm({ ...form, connections: event.target.value })}
               />
             </Field>
-            <Field label="socks_listen">
+            <Field label="socks_listen" htmlFor="peer-socks-listen">
               <Input
+                id="peer-socks-listen"
                 value={form.socks_listen}
                 onChange={(event) => setForm({ ...form, socks_listen: event.target.value })}
               />
             </Field>
-            <Field label="http_listen">
+            <Field label="http_listen" htmlFor="peer-http-listen">
               <Input
+                id="peer-http-listen"
                 value={form.http_listen}
                 onChange={(event) => setForm({ ...form, http_listen: event.target.value })}
               />
@@ -342,21 +346,81 @@ export function PeersTab({ node }: { node: CenterNode }) {
                 onCheckedChange={(checked) => setForm({ ...form, enabled: checked })}
               />
             </div>
-            <Field label="Path settings">
+            <Field label="Desired encryption" htmlFor="peer-encryption">
+              <select
+                id="peer-encryption"
+                className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                value={form.encryption}
+                onChange={(event) => setForm({ ...form, encryption: event.target.value })}
+              >
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </Field>
+            <Field label="Desired compression mode" htmlFor="peer-compression-mode">
+              <select
+                id="peer-compression-mode"
+                className="flex h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                value={form.compression_mode}
+                onChange={(event) => setForm({ ...form, compression_mode: event.target.value })}
+              >
+                <option value="enabled">enabled</option>
+                <option value="disabled">disabled</option>
+              </select>
+            </Field>
+            <Field label="Desired compression level" htmlFor="peer-compression-level">
+              <Input
+                id="peer-compression-level"
+                type="number"
+                min={1}
+                max={22}
+                step={1}
+                value={form.compression_level}
+                onChange={(event) => setForm({ ...form, compression_level: event.target.value })}
+              />
+            </Field>
+            <Field label="Applied encryption" htmlFor="peer-applied-encryption">
+              <output id="peer-applied-encryption" className="text-sm">
+                {form.applied_encryption}
+              </output>
+            </Field>
+            <Field label="Applied compression mode" htmlFor="peer-applied-compression-mode">
+              <output id="peer-applied-compression-mode" className="text-sm">
+                {form.applied_compression_mode}
+              </output>
+            </Field>
+            <Field label="Applied compression level" htmlFor="peer-applied-compression-level">
+              <output id="peer-applied-compression-level" className="text-sm">
+                {form.applied_compression_level}
+              </output>
+            </Field>
+            <Field label="Restart required" htmlFor="peer-restart-required">
+              <output id="peer-restart-required" className="text-sm">
+                {String(form.restart_required)}
+              </output>
+            </Field>
+            <Field label="Path settings" htmlFor="peer-paths">
               <Textarea
+                id="peer-paths"
                 className="min-h-24 font-mono text-xs"
                 value={form.paths}
                 onChange={(event) => setForm({ ...form, paths: event.target.value })}
               />
             </Field>
-            <Field label="Port forwards">
+            <Field label="Port forwards" htmlFor="peer-port-forwards">
               <Textarea
+                id="peer-port-forwards"
                 className="min-h-24 font-mono text-xs"
                 value={form.port_forwards}
                 onChange={(event) => setForm({ ...form, port_forwards: event.target.value })}
               />
             </Field>
           </div>
+          <p className="px-4 text-sm text-muted-foreground">
+            Provide either quic_peer addresses or a paths array. Connection settings on a newly
+            created peer apply immediately. Editing connection settings on an existing peer
+            updates desired values and requires a client process restart.
+          </p>
           <SheetFooter>
             <Button variant="outline" onClick={() => setEditorOpen(false)}>Cancel</Button>
             <Button disabled={writing} onClick={() => void savePeer()}>
@@ -384,24 +448,19 @@ export function PeersTab({ node }: { node: CenterNode }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  htmlFor,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  children: ReactNode;
+}) {
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
     </div>
   );
-}
-
-function emptyPeerForm() {
-  return {
-    peer_id: "",
-    quic_peer: "",
-    connections: "1",
-    socks_listen: "127.0.0.1:1080",
-    http_listen: "127.0.0.1:8080",
-    enabled: true,
-    paths: "[]",
-    port_forwards: "[]",
-  };
 }
