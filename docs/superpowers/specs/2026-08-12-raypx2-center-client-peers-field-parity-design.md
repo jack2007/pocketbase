@@ -2,6 +2,7 @@
 
 **日期：** 2026-08-12  
 **状态：** 已批准  
+**实现计划：** [docs/superpowers/plans/2026-08-12-raypx2-center-client-peers-field-parity.md](../plans/2026-08-12-raypx2-center-client-peers-field-parity.md)
 **范围仓库：** `/home/jack/src/pocketbase`（`apps/raypx2-center`）  
 **对照实现：** `/home/jack/src/raypx2/src/admin_console`（Peers 表单与列表）  
 **前置：** Client Peer CRUD（`2026-08-11-raypx2-center-client-peer-crud-design.md`）
