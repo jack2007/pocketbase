@@ -55,9 +55,10 @@ export function readPeerConnections(peer: JsonObject): number {
 
 export function readDesiredConnection(peer: JsonObject): PeerConnection {
   const config = asObject(peer.connection_config);
-  const desired = config ? config.desired : undefined;
-  if (desired !== undefined) return normalizeConnection(desired);
-  if (peer.connection !== undefined) return normalizeConnection(peer.connection);
+  const desired = asObject(config?.desired);
+  if (desired) return normalizeConnection(desired);
+  const connection = asObject(peer.connection);
+  if (connection) return normalizeConnection(connection);
   return { ...DEFAULT_CONNECTION, compression: { ...DEFAULT_CONNECTION.compression } };
 }
 

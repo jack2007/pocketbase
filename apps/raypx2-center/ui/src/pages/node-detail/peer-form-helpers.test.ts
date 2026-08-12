@@ -33,6 +33,19 @@ describe("peer-form-helpers", () => {
     expect(readDesiredConnection({}).encryption).toBe("enabled");
   });
 
+  it("falls back to peer.connection when desired is null", () => {
+    expect(readDesiredConnection({
+      connection_config: { desired: null },
+      connection: {
+        encryption: "disabled",
+        compression: { mode: "enabled", level: 3 },
+      },
+    })).toEqual({
+      encryption: "disabled",
+      compression: { mode: "enabled", level: 3 },
+    });
+  });
+
   it("reads applied and restart_required from connection_config", () => {
     const peer = {
       connection_config: {
@@ -105,5 +118,10 @@ describe("peer-form-helpers", () => {
     expect(form.applied_compression_level).toBe("1");
     expect(form.restart_required).toBe(true);
     expect(form.enabled).toBe(false);
+  });
+
+  it("maps address to quic_peer when quic_peer is absent", () => {
+    expect(peerToForm({ address: "edge.example:443" }).quic_peer)
+      .toBe("edge.example:443");
   });
 });
