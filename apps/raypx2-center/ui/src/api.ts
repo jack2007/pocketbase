@@ -45,30 +45,6 @@ export interface ApplyJob {
   targets: ApplyJobTarget[];
 }
 
-export interface ConfigRevision {
-  id: string;
-  kind: "actual" | "desired";
-  source: string;
-  created: string;
-}
-
-export interface NodeConfigResponse {
-  node_key: string;
-  role: string;
-  online: boolean;
-  live: Record<string, unknown> | null;
-  editor_draft: Record<string, unknown>;
-  writable_paths: string[];
-  recent_revisions: ConfigRevision[];
-}
-
-export interface NodeConfigUpdateResult {
-  applied: Record<string, unknown>;
-  ignored_fields: string[];
-  revision_id: string;
-  admin_status: number;
-}
-
 export class CenterRequestError extends Error {
   status: number;
   code?: string;
@@ -174,29 +150,6 @@ export function createApplyJob(template: string, nodes: string[]): Promise<Apply
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ template, nodes }),
-  });
-}
-
-export async function listConfigRevisions(nodeId: string): Promise<ConfigRevision[]> {
-  const result = await pb.collection("config_revisions").getList<ConfigRevision>(1, 100, {
-    filter: pb.filter("node = {:node}", { node: nodeId }),
-    sort: "-created",
-  });
-  return result.items;
-}
-
-export function getNodeConfig(nodeKey: string): Promise<NodeConfigResponse> {
-  return centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}/config`);
-}
-
-export function putNodeConfig(
-  nodeKey: string,
-  content: Record<string, unknown>,
-): Promise<NodeConfigUpdateResult> {
-  return centerRequest(`/api/center/nodes/${encodeURIComponent(nodeKey)}/config`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
   });
 }
 

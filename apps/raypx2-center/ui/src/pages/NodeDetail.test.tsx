@@ -9,9 +9,7 @@ vi.mock("../api", async () => {
   return {
     ...actual,
     deleteNodePeer: vi.fn(),
-    getNodeConfig: vi.fn(),
     listAuditLogs: vi.fn().mockResolvedValue([]),
-    putNodeConfig: vi.fn(),
     proxyNode: vi.fn().mockResolvedValue({}),
   };
 });
@@ -26,31 +24,9 @@ const offlineServer: CenterNode = {
 
 const onlineServer = { ...offlineServer, online: true };
 
-const serverConfig = {
-  node_key: onlineServer.node_key,
-  role: "server",
-  online: true,
-  live: {
-    allow_targets: ["10.0.0.0/8"],
-    deny_targets: [],
-    connection_config: {
-      restart_required: true,
-      pending_fields: ["connection.compression.level"],
-    },
-  },
-  editor_draft: {
-    allow_targets: ["10.0.0.0/8"],
-    deny_targets: [],
-    connection: { compression: { level: 3 } },
-  },
-  writable_paths: ["allow_targets", "deny_targets", "connection.compression.level"],
-  recent_revisions: [],
-};
-
 describe("NodeDetail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.getNodeConfig).mockResolvedValue(serverConfig);
   });
   afterEach(() => {
     cleanup();
@@ -341,291 +317,33 @@ describe("NodeDetail", () => {
     expect(screen.getByText("healthy")).toBeInTheDocument();
   });
 
-  it("keeps applied config and shows refresh warning when post-save GET fails", async () => {
-    vi.mocked(api.putNodeConfig).mockResolvedValue({
-      applied: {
-        allow_targets: ["127.0.0.0/8"],
-        deny_targets: [],
-        connection: { compression: { level: 4 } },
-      },
-      ignored_fields: ["listen"],
-      revision_id: "rev1",
-      admin_status: 200,
-    });
-    vi.mocked(api.getNodeConfig)
-      .mockResolvedValueOnce(serverConfig)
-      .mockRejectedValueOnce(new Error("503: Service unavailable"));
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+  it("does not show a Config tab for client, server, or unknown nodes", () => {
+    const { unmount } = render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    expect(screen.queryByRole("tab", { name: "Config" })).not.toBeInTheDocument();
+    unmount();
 
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    const level = await screen.findByLabelText("Compression level");
-    fireEvent.change(level, { target: { value: "4" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
-    expect(screen.getByText("listen")).toBeInTheDocument();
-    expect(screen.getByRole("alert")).toHaveTextContent(/metadata could not be refreshed/i);
-    expect(screen.getByLabelText("Compression level")).toHaveValue(4);
-  });
-
-  it("re-fetches config metadata and revisions after saving", async () => {
-    const put = vi.mocked(api.putNodeConfig).mockResolvedValue({
-      applied: { allow_targets: ["127.0.0.0/8"], deny_targets: [], connection: { compression: { level: 3 } } },
-      ignored_fields: ["listen"],
-      revision_id: "rev1",
-      admin_status: 200,
-    });
-    vi.mocked(api.getNodeConfig)
-      .mockResolvedValueOnce(serverConfig)
-      .mockResolvedValueOnce({
-        ...serverConfig,
-        live: {
-          ...serverConfig.live,
-          connection_config: {
-            restart_required: false,
-            pending_fields: [],
-          },
-        },
-        editor_draft: {
-          allow_targets: ["127.0.0.0/8"],
-          deny_targets: [],
-          connection: { compression: { level: 3 } },
-        },
-        recent_revisions: [{
-          id: "rev1",
-          kind: "desired",
-          source: "manual_edit",
-          created: "2026-08-10T12:00:00Z",
-        }],
-      });
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    expect(await screen.findByText(/restart required/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(put).toHaveBeenCalledWith(
-      onlineServer.node_key,
-      serverConfig.editor_draft,
-    ));
-    await waitFor(() => expect(api.getNodeConfig).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/ignored fields/i)).toBeInTheDocument();
-    expect(screen.getByText("listen")).toBeInTheDocument();
-    expect(screen.getByText("Restart required: No")).toBeInTheDocument();
-    expect(screen.getByText("manual_edit")).toBeInTheDocument();
-  });
-
-  it("blocks switching to Form when JSON is invalid", async () => {
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    await screen.findByLabelText("Compression level");
-
-    fireEvent.click(screen.getByRole("button", { name: "JSON" }));
-    fireEvent.change(screen.getByLabelText("JSON configuration"), { target: { value: "{" } });
-    fireEvent.click(screen.getByRole("button", { name: "Form" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent(/valid JSON object/i);
-    expect(screen.getByRole("button", { name: "JSON" })).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("disables config save when offline", async () => {
-    vi.mocked(api.getNodeConfig).mockResolvedValue({
-      ...serverConfig,
-      online: false,
-      live: null,
-      editor_draft: {},
-    });
-    render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    expect(await screen.findByRole("button", { name: "Save" })).toBeDisabled();
-    expect(screen.getByText(/configuration is read-only/i)).toBeInTheDocument();
-  });
-
-  it("constrains server compression level and blocks invalid saves", async () => {
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    const level = await screen.findByLabelText("Compression level");
-    expect(level).toHaveAttribute("min", "1");
-    expect(level).toHaveAttribute("max", "22");
-    expect(level).toHaveAttribute("step", "1");
-
-    fireEvent.change(level, { target: { value: "23" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(screen.getByRole("alert")).toHaveTextContent(/integer between 1 and 22/i);
-    expect(api.putNodeConfig).not.toHaveBeenCalled();
-  });
-
-  it("edits client port forwards and QUIC connections while keeping peer ID read-only", async () => {
-    vi.mocked(api.getNodeConfig).mockResolvedValue({
-      ...serverConfig,
+    const client: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
       role: "client",
-      editor_draft: {
-        peers: [{
-          peer_id: "peer-a",
-          quic_peer: "edge.example:4433",
-          quic_connections: 2,
-          port_forwards: [{ listen: ":8080", target: "127.0.0.1:80" }],
-          enabled: true,
-        }],
-      },
-      writable_paths: [
-        "peers[].peer_id",
-        "peers[].port_forwards",
-        "peers[].quic_connections",
-      ],
-    });
-    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    expect(await screen.findByLabelText("Peer ID")).toHaveAttribute("readonly");
-    const connections = screen.getByLabelText("QUIC connections");
-    expect(connections).toHaveAttribute("type", "number");
-    expect(connections).toHaveAttribute("step", "1");
-    fireEvent.change(connections, { target: { value: "4" } });
-    fireEvent.change(screen.getByLabelText("Port forward 1 listen"), {
-      target: { value: ":9090" },
-    });
-    fireEvent.change(screen.getByLabelText("Port forward 1 target"), {
-      target: { value: "127.0.0.1:90" },
-    });
-
-    expect(connections).toHaveValue(4);
-    expect(screen.getByLabelText("Port forward 1 listen")).toHaveValue(":9090");
-    expect(screen.getByLabelText("Port forward 1 target")).toHaveValue("127.0.0.1:90");
-    expect(screen.getByRole("button", { name: "Add port forward" })).toBeEnabled();
-  });
-
-  it("adds a draft peer with editable peer ID and can remove it before save", async () => {
-    vi.mocked(api.getNodeConfig).mockResolvedValue({
-      ...serverConfig,
-      role: "client",
-      editor_draft: {
-        peers: [{
-          peer_id: "peer-a",
-          quic_peer: "edge.example:4433",
-          enabled: true,
-        }],
-      },
-      writable_paths: ["peers[].peer_id"],
-    });
-    vi.mocked(api.putNodeConfig).mockResolvedValue({
-      applied: { peers: [{ peer_id: "peer-a" }, { peer_id: "peer-b" }] },
-      ignored_fields: [],
-      revision_id: "rev-1",
-      admin_status: 200,
-    });
-    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    expect(await screen.findByLabelText("Peer ID")).toHaveAttribute("readonly");
-    fireEvent.click(screen.getByRole("button", { name: "Add peer" }));
-
-    const peerIds = screen.getAllByLabelText("Peer ID");
-    expect(peerIds).toHaveLength(2);
-    expect(peerIds[0]).toHaveAttribute("readonly");
-    expect(peerIds[1]).not.toHaveAttribute("readonly");
-
-    fireEvent.change(peerIds[1], { target: { value: "peer-b" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => {
-      expect(api.putNodeConfig).toHaveBeenCalledWith("server-sg-1", {
-        peers: [
-          expect.objectContaining({ peer_id: "peer-a" }),
-          expect.objectContaining({ peer_id: "peer-b" }),
-        ],
-      });
-    });
-    const saved = vi.mocked(api.putNodeConfig).mock.calls[0][1] as {
-      peers: Array<Record<string, unknown>>;
+      online: true,
     };
-    expect(saved.peers[1]._draft_new).toBeUndefined();
-  });
+    const clientView = render(<NodeDetail node={client} onBack={() => undefined} />);
+    expect(screen.queryByRole("tab", { name: "Config" })).not.toBeInTheDocument();
+    clientView.unmount();
 
-  it("rejects saving a draft peer without peer ID", async () => {
-    vi.mocked(api.getNodeConfig).mockResolvedValue({
-      ...serverConfig,
-      role: "client",
-      editor_draft: { peers: [] },
-      writable_paths: ["peers[].peer_id"],
-    });
-    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Add peer" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/non-empty Peer ID/i);
-    expect(api.putNodeConfig).not.toHaveBeenCalled();
-  });
-
-  it("removes only draft peers from the Config form", async () => {
-    vi.mocked(api.getNodeConfig).mockResolvedValue({
-      ...serverConfig,
-      role: "client",
-      editor_draft: {
-        peers: [{ peer_id: "peer-a", enabled: true }],
-      },
-      writable_paths: ["peers[].peer_id"],
-    });
-    render(<NodeDetail node={{ ...onlineServer, role: "client" }} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    await screen.findByLabelText("Peer ID");
-    expect(screen.queryByRole("button", { name: "Remove from draft" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Add peer" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove from draft" }));
-
-    expect(screen.getAllByLabelText("Peer ID")).toHaveLength(1);
-    expect(screen.getByLabelText("Peer ID")).toHaveValue("peer-a");
-  });
-
-  it("treats a 503 node_offline save response as offline and preserves the draft", async () => {
-    vi.mocked(api.putNodeConfig).mockRejectedValue(Object.assign(new Error("node_offline"), {
-      status: 503,
-      code: "node_offline",
-      data: { code: "node_offline" },
-    }));
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    const level = await screen.findByLabelText("Compression level");
-    fireEvent.change(level, { target: { value: "5" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(/offline/i);
-    expect(screen.getByLabelText("Compression level")).toHaveValue(5);
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-  });
-
-  it("confirms before leaving Config when the draft is dirty", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    fireEvent.change(await screen.findByLabelText("Compression level"), {
-      target: { value: "5" },
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "Peers" }));
-
-    expect(confirm).toHaveBeenCalled();
-    expect(screen.getByRole("tab", { name: "Config" })).toHaveAttribute("aria-selected", "true");
-  });
-
-  it("does not confirm when clicking the active Config tab", async () => {
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-    fireEvent.change(await screen.findByLabelText("Compression level"), {
-      target: { value: "5" },
-    });
-
-    fireEvent.click(screen.getByRole("tab", { name: "Config" }));
-
-    expect(confirm).not.toHaveBeenCalled();
+    const unknown: CenterNode = {
+      id: "node-u1",
+      node_key: "unknown-1",
+      name: "Unknown node",
+      role: "unknown",
+      online: true,
+    };
+    render(<NodeDetail node={unknown} onBack={() => undefined} />);
+    expect(screen.queryByRole("tab", { name: "Config" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Audit" })).toBeInTheDocument();
   });
 
   it("shows a Tunnels tab", () => {
@@ -883,7 +601,7 @@ describe("NodeDetail", () => {
   });
 });
 
-describe("center config API", () => {
+describe("center proxy API", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("surfaces HTTP status and error code", async () => {
@@ -893,7 +611,7 @@ describe("center config API", () => {
       { status: 503, headers: { "Content-Type": "application/json" } },
     )));
 
-    await expect(actual.getNodeConfig("node/one")).rejects.toMatchObject({
+    await expect(actual.proxyNode("node/one", "GET", "/api/v1/server/connections")).rejects.toMatchObject({
       status: 503,
       code: "node_offline",
       data: { code: "node_offline" },

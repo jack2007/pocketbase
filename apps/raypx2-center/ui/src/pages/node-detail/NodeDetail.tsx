@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AclTab } from "./AclTab";
 import { AuditTab } from "./AuditTab";
-import { ConfigTab } from "./ConfigTab";
 import { ConnectionsTab } from "./ConnectionsTab";
 import { OverviewTab } from "./OverviewTab";
 import { PeersTab } from "./PeersTab";
@@ -19,7 +18,6 @@ type Tab =
   | "connections"
   | "tunnels"
   | "acl"
-  | "config"
   | "audit";
 
 interface NodeDetailProps {
@@ -29,18 +27,12 @@ interface NodeDetailProps {
 
 export function NodeDetail({ node, onBack }: NodeDetailProps) {
   const [tab, setTab] = useState<Tab>("overview");
-  const [configDirty, setConfigDirty] = useState(false);
 
   const tabs: Tab[] = node.role === "server"
-    ? ["overview", "peers", "connections", "tunnels", "acl", "config", "audit"]
+    ? ["overview", "peers", "connections", "tunnels", "acl", "audit"]
     : node.role === "client"
-      ? ["overview", "peers", "connections", "tunnels", "config", "audit"]
-      : ["overview", "config", "audit"];
-
-  function leaveConfig(action: () => void) {
-    if (tab === "config" && configDirty && !window.confirm("Discard unsaved configuration changes?")) return;
-    action();
-  }
+      ? ["overview", "peers", "connections", "tunnels", "audit"]
+      : ["overview", "audit"];
 
   function title(item: Tab) {
     return item === "acl" ? "ACL" : item.charAt(0).toUpperCase() + item.slice(1);
@@ -52,7 +44,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
         variant="ghost"
         size="sm"
         className="mb-3 -ml-2 text-muted-foreground"
-        onClick={() => leaveConfig(onBack)}
+        onClick={onBack}
       >
         <ArrowLeft className="size-4" />
         Back to nodes
@@ -78,7 +70,7 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
                 : "border-transparent text-muted-foreground hover:text-foreground",
             )}
             onClick={() => {
-              if (item !== tab) leaveConfig(() => setTab(item));
+              if (item !== tab) setTab(item);
             }}
           >
             {title(item)}
@@ -91,7 +83,6 @@ export function NodeDetail({ node, onBack }: NodeDetailProps) {
       {tab === "connections" && <ConnectionsTab node={node} />}
       {tab === "tunnels" && <TunnelsTab node={node} />}
       {tab === "acl" && <AclTab node={node} />}
-      {tab === "config" && <ConfigTab node={node} onDirtyChange={setConfigDirty} />}
       {tab === "audit" && <AuditTab node={node} />}
     </section>
   );
