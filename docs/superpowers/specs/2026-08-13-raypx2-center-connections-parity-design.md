@@ -2,6 +2,7 @@
 
 **日期：** 2026-08-13  
 **状态：** 已批准  
+**实现计划：** [docs/superpowers/plans/2026-08-13-raypx2-center-connections-parity.md](../plans/2026-08-13-raypx2-center-connections-parity.md)  
 **范围仓库：** `/home/jack/src/pocketbase`（`apps/raypx2-center/ui`）  
 **对照实现：** `/home/jack/src/raypx2/src/admin_console`（Connections 表、行内速率编辑、Detail）  
 **前置：** Client Peers 字段对齐（`2026-08-12-raypx2-center-client-peers-field-parity-design.md`）
