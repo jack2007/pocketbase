@@ -145,6 +145,190 @@ describe("NodeDetail", () => {
     expect(api.proxyNode).not.toHaveBeenCalledWith(node.node_key, "GET", "/api/v1/server/config");
   });
 
+  it("shows admin-aligned client connection columns and applies both rate patches", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
+      if (method === "GET" && path === "/api/v1/peers") {
+        return { peers: [{ peer_id: "peer-a" }] };
+      }
+      if (method === "GET" && path === "/api/v1/peers/peer-a/connections") {
+        return {
+          connections: [{
+            connection_id: "conn-0",
+            slot_index: 0,
+            generation: 1,
+            connected: true,
+            retry_scheduled: false,
+            state: "ready",
+            encryption: "disabled",
+            compression_mode: "disabled",
+            compression_level: 1,
+            path: "default",
+            local: "127.0.0.1:1",
+            peer: "10.0.0.2:4433",
+            active_tunnels: 0,
+            last_error: "",
+            min_send_rate_kbps: 0,
+            max_send_rate_kbps: 0,
+            effective_server_tx_min_kbps: 0,
+            effective_server_tx_max_kbps: 0,
+          }],
+        };
+      }
+      if (method === "GET" && path === "/api/v1/peers/peer-a/connections/conn-0") {
+        return { connection_id: "conn-0", state: "ready" };
+      }
+      return {};
+    });
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(await screen.findByText("conn-0")).toBeInTheDocument();
+
+    for (const header of [
+      "slot_index",
+      "generation",
+      "connected",
+      "retry_scheduled",
+      "encryption",
+      "compression_mode",
+      "compression_level",
+      "client_min_send_rate_kbps",
+      "server_min_send_rate_kbps",
+    ]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
+    }
+
+    fireEvent.change(screen.getByLabelText("client_min_send_rate_kbps"), { target: { value: "100" } });
+    fireEvent.change(screen.getByLabelText("client_max_send_rate_kbps"), { target: { value: "200" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply client rate" }));
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        "client-1",
+        "PATCH",
+        "/api/v1/peers/peer-a/connections/conn-0",
+        { min_send_rate_kbps: 100, max_send_rate_kbps: 200 },
+      );
+    });
+
+    fireEvent.change(screen.getByLabelText("server_min_send_rate_kbps"), { target: { value: "30" } });
+    fireEvent.change(screen.getByLabelText("server_max_send_rate_kbps"), { target: { value: "40" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply server rate" }));
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        "client-1",
+        "PATCH",
+        "/api/v1/peers/peer-a/connections/conn-0/server-send-rate",
+        { min_send_rate_kbps: 30, max_send_rate_kbps: 40 },
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Detail" }));
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        "client-1",
+        "GET",
+        "/api/v1/peers/peer-a/connections/conn-0",
+      );
+    });
+  });
+
+  it("does not patch client rates when bounds are invalid", async () => {
+    const node: CenterNode = {
+      id: "node-c1",
+      node_key: "client-1",
+      name: "Client one",
+      role: "client",
+      online: true,
+    };
+    vi.mocked(api.proxyNode).mockImplementation(async (_key, method, path) => {
+      if (method === "GET" && path === "/api/v1/peers") {
+        return { peers: [{ peer_id: "peer-a" }] };
+      }
+      if (method === "GET" && path === "/api/v1/peers/peer-a/connections") {
+        return {
+          connections: [{
+            connection_id: "conn-0",
+            min_send_rate_kbps: 0,
+            max_send_rate_kbps: 0,
+          }],
+        };
+      }
+      return {};
+    });
+
+    render(<NodeDetail node={node} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
+    await screen.findByLabelText("client_min_send_rate_kbps");
+    fireEvent.change(screen.getByLabelText("client_min_send_rate_kbps"), { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply client rate" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/safe non-negative integers/i);
+    expect(vi.mocked(api.proxyNode).mock.calls.filter((call) => call[1] === "PATCH")).toHaveLength(0);
+  });
+
+  it("shows admin-aligned server connection columns and applies send rates", async () => {
+    vi.mocked(api.proxyNode).mockResolvedValue({
+      connections: [{
+        connection_id: "sc1",
+        client_name: "",
+        remote_address: "192.168.1.9:443",
+        state: "ready",
+        encryption: "enabled",
+        active_streams: 2,
+        total_streams: 8,
+        active_tunnels: 1,
+        last_error: "",
+        min_send_rate_kbps: 0,
+        max_send_rate_kbps: 0,
+      }],
+    });
+    render(<NodeDetail node={onlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
+
+    expect(await screen.findByText("sc1")).toBeInTheDocument();
+    expect(screen.getByText("peer-192.168.1.9:443")).toBeInTheDocument();
+    expect(screen.getByText("8")).toBeInTheDocument();
+    for (const header of [
+      "remote_address",
+      "encryption",
+      "active_streams",
+      "total_streams_opened",
+      "active_tunnels",
+      "min_send_rate_kbps",
+      "max_send_rate_kbps",
+    ]) {
+      expect(screen.getByRole("columnheader", { name: header })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole("button", { name: "Detail" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("min_send_rate_kbps"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("max_send_rate_kbps"), { target: { value: "80" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    await waitFor(() => {
+      expect(api.proxyNode).toHaveBeenCalledWith(
+        onlineServer.node_key,
+        "PATCH",
+        "/api/v1/server/connections/sc1",
+        { min_send_rate_kbps: 50, max_send_rate_kbps: 80 },
+      );
+    });
+  });
+
+  it("disables connection writes while the node is offline", async () => {
+    render(<NodeDetail node={offlineServer} onBack={() => undefined} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Connections" }));
+    expect(screen.getByText("Writes are disabled while this node is offline.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+    expect(api.proxyNode).not.toHaveBeenCalled();
+  });
+
   it("shows health status from the node record on Overview", () => {
     render(
       <NodeDetail
