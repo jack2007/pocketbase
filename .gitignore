@@ -21,3 +21,6 @@ CHANGELOG.html
 CHANGELOG_16_22.html
 CHANGELOG_8_15.html
 LICENSE.html
+
+# coturn CMake build (scripts/build-coturn.sh)
+/build-coturn/
