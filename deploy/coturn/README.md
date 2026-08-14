@@ -50,5 +50,5 @@ Record the result for gitlink `7c24c88a4c13ef79edce9e645bef578eb7e5a6ad`
 after Task 5:
 
 ```text
-(pending Task 5)
+Pinned gitlink `7c24c88a4c13ef79edce9e645bef578eb7e5a6ad`: authenticated Refresh after credential timestamp expiry succeeded. Existing allocations remain usable until Delete or idle timeout.
 ```
