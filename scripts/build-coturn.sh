@@ -14,8 +14,8 @@ cmake -S "${SRC}" -B "${BUILD}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=OFF \
   -DFUZZER=OFF \
-  -DWITH_MYSQL=OFF
-cmake --build "${BUILD}" --target turnserver --parallel
+  -DWITH_MYSQL=OFF >&2
+cmake --build "${BUILD}" --target turnserver --parallel >&2
 
 BIN="${BUILD}/bin/turnserver"
 if [[ ! -x "${BIN}" ]]; then
