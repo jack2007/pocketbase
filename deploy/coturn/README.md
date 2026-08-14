@@ -46,8 +46,7 @@ Allow inbound UDP `3478` and the relay range (`49152-65535/udp` unless
 
 ## Refresh compatibility
 
-Record the result for gitlink `7c24c88a4c13ef79edce9e645bef578eb7e5a6ad`
-after Task 5:
+Record the result for gitlink `7c24c88a4c13ef79edce9e645bef578eb7e5a6ad`:
 
 ```text
 Pinned gitlink `7c24c88a4c13ef79edce9e645bef578eb7e5a6ad`: authenticated Refresh after credential timestamp expiry succeeded. Existing allocations remain usable until Delete or idle timeout.

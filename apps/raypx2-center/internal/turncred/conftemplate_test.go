@@ -74,6 +74,7 @@ func TestTurnserverTemplateUDPOnly(t *testing.T) {
 		"denied-peer-ip=169.254.0.0-169.254.255.255",
 		"denied-peer-ip=::",
 		"denied-peer-ip=::1",
+		"denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 	}
 	for _, want := range required {
 		if !hasLine(lines, want) {
