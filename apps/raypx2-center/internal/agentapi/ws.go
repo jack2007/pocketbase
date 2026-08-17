@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agenthub"
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/p2p"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/protocol"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
@@ -28,8 +29,10 @@ const (
 )
 
 var (
-	hubMu sync.RWMutex
-	hub   = agenthub.New()
+	hubMu     sync.RWMutex
+	hub       = agenthub.New()
+	p2pMu     sync.RWMutex
+	p2pBroker *p2p.Broker
 )
 
 type wsConn struct {
@@ -48,6 +51,12 @@ func (c *wsConn) Send(ctx context.Context, frame protocol.Frame) error {
 	return wsjson.Write(ctx, c.conn, frame)
 }
 
+func (c *wsConn) SendRaw(ctx context.Context, payload []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.conn.Write(ctx, websocket.MessageText, payload)
+}
+
 func (c *wsConn) Close(reason string) error {
 	return c.conn.Close(websocket.StatusNormalClosure, reason)
 }
@@ -63,6 +72,19 @@ func currentHub() *agenthub.Hub {
 	hubMu.RLock()
 	defer hubMu.RUnlock()
 	return hub
+}
+
+// SetP2PBroker installs the process-wide ICE signaling broker.
+func SetP2PBroker(broker *p2p.Broker) {
+	p2pMu.Lock()
+	defer p2pMu.Unlock()
+	p2pBroker = broker
+}
+
+func currentP2P() *p2p.Broker {
+	p2pMu.RLock()
+	defer p2pMu.RUnlock()
+	return p2pBroker
 }
 
 // LookupSession validates an Authorization header and returns its live session and node.
@@ -160,14 +182,25 @@ func HandleWS(e *core.RequestEvent) error {
 
 	for {
 		readCtx, cancel := context.WithTimeout(e.Request.Context(), 3*heartbeatInterval)
-		var frame protocol.Frame
-		err := wsjson.Read(readCtx, conn, &frame)
+		_, data, err := conn.Read(readCtx)
 		cancel()
 		if err != nil {
 			return nil
 		}
 		if err := touchNode(e.App, node.Id); err != nil {
 			e.App.Logger().Error("failed to update agent last seen", "node", nodeKey, "error", err)
+		}
+		if p2p.LooksLike(data) {
+			if broker := currentP2P(); broker != nil {
+				if fwdErr := broker.Forward(nodeKey, data); fwdErr != nil {
+					e.App.Logger().Error("failed to forward p2p frame", "node", nodeKey, "error", fwdErr)
+				}
+			}
+			continue
+		}
+		var frame protocol.Frame
+		if err := json.Unmarshal(data, &frame); err != nil {
+			return nil
 		}
 		switch frame.Type {
 		case "ping":

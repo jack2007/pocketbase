@@ -12,6 +12,7 @@ import (
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/apply"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/centerapi"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/collections"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/p2p"
 	"github.com/pocketbase/pocketbase/core"
 )
 
@@ -28,6 +29,9 @@ func main() {
 	agentapi.SetHub(hub)
 	apply.SetProxyRequester(hub)
 	centerAPI := centerapi.New(hub)
+	p2pBroker := p2p.NewBroker(hub, p2p.ConfigFromEnv())
+	centerAPI.SetP2P(p2pBroker)
+	agentapi.SetP2PBroker(p2pBroker)
 
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		if err := initializeCenter(e.App); err != nil {
@@ -53,6 +57,7 @@ func main() {
 		center.GET("/apply-jobs", centerAPI.HandleListApplyJobs)
 		center.POST("/apply-jobs", centerAPI.HandleCreateApplyJob)
 		center.GET("/apply-jobs/{job_id}", centerAPI.HandleGetApplyJob)
+		center.POST("/p2p/sessions", centerAPI.HandleCreateP2PSession)
 		bindUIRoutes(e)
 		return e.Next()
 	})

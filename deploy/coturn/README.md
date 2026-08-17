@@ -39,10 +39,17 @@ turn:turn.example.com:3478?transport=udp
 Do not issue `127.0.0.1` or `::1` to remote agents. Same host means Center
 and coturn share a machine, not that agents connect to loopback.
 
+## Test server
+
+The shared signaling + coturn test host is documented in
+[test-server.md](test-server.md): `64.176.42.49`, Center HTTP `8443`,
+coturn listening-port `8744`, relay `50000-50500`.
+
 ## Firewall
 
 Allow inbound UDP `3478` and the relay range (`49152-65535/udp` unless
 `min-port`/`max-port` are narrowed). Do not open TCP 3478 or TLS 5349.
+On the test server, open UDP `8744` and `50000-50500` instead.
 
 ## Refresh compatibility
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/agenthub"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/p2p"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/hook"
 )
@@ -17,11 +18,16 @@ type ProxyRequester interface {
 type API struct {
 	hub        ProxyRequester
 	agentHub   *agenthub.Hub
+	p2p        *p2p.Broker
 	startApply func(string) error
 }
 
 func New(hub *agenthub.Hub) *API {
 	return &API{hub: hub, agentHub: hub}
+}
+
+func (api *API) SetP2P(broker *p2p.Broker) {
+	api.p2p = broker
 }
 
 func actorID(e *core.RequestEvent) string {

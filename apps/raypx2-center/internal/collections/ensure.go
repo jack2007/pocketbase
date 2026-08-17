@@ -23,6 +23,7 @@ func EnsureCollections(app core.App) error {
 			&core.TextField{Name: "name"},
 			&core.SelectField{Name: "role", Values: []string{"client", "server", "unknown"}},
 			&core.TextField{Name: "enroll_secret_hash", Hidden: true, Required: true},
+			&core.TextField{Name: "grant_mac_key", Hidden: true},
 			&core.SelectField{Name: "enroll_status", Values: []string{"active", "revoked"}},
 			&core.JSONField{Name: "labels"},
 			&core.TextField{Name: "hostname"},
@@ -34,6 +35,9 @@ func EnsureCollections(app core.App) error {
 		collection.AddIndex("idx_nodes_node_key", true, "node_key", "")
 	})
 	if err != nil {
+		return err
+	}
+	if err := ensureHiddenTextField(app, nodes, "grant_mac_key"); err != nil {
 		return err
 	}
 
@@ -162,6 +166,14 @@ func addAutodates(collection *core.Collection) bool {
 		changed = true
 	}
 	return changed
+}
+
+func ensureHiddenTextField(app core.App, collection *core.Collection, name string) error {
+	if collection.Fields.GetByName(name) != nil {
+		return nil
+	}
+	collection.Fields.Add(&core.TextField{Name: name, Hidden: true})
+	return app.Save(collection)
 }
 
 func ensureSelectValues(app core.App, collection *core.Collection, fieldName string, want []string) error {

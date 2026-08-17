@@ -69,16 +69,22 @@ func TestTurnserverTemplateUDPOnly(t *testing.T) {
 		"no-tcp-relay",
 		"user-quota=2",
 		"no-multicast-peers",
-		"denied-peer-ip=0.0.0.0-0.0.0.0",
 		"denied-peer-ip=127.0.0.0-127.255.255.255",
 		"denied-peer-ip=169.254.0.0-169.254.255.255",
-		"denied-peer-ip=::",
 		"denied-peer-ip=::1",
 		"denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
 	}
 	for _, want := range required {
 		if !hasLine(lines, want) {
 			t.Errorf("missing %q", want)
+		}
+	}
+	for _, banned := range []string{
+		"denied-peer-ip=::",
+		"denied-peer-ip=0.0.0.0-0.0.0.0",
+	} {
+		if hasLine(lines, banned) {
+			t.Errorf("%s matches every IPv4 peer in coturn 4.17", banned)
 		}
 	}
 	for _, line := range lines {

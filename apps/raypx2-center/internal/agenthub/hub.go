@@ -19,6 +19,12 @@ type Conn interface {
 	Close(reason string) error
 }
 
+// RawSender is implemented by WebSocket connections that can emit
+// unwrapped P2P JSON frames (invite/grant/candidate).
+type RawSender interface {
+	SendRaw(context.Context, []byte) error
+}
+
 type Option func(*Hub)
 
 func WithSessionRevoker(revoke func(string) error) Option {
@@ -152,4 +158,20 @@ func (h *Hub) Send(nodeKey string, frame protocol.Frame) error {
 		return ErrNodeOffline
 	}
 	return conn.Send(context.Background(), frame)
+}
+
+func (h *Hub) SendRaw(nodeKey string, payload []byte) error {
+	h.mu.RLock()
+	conn := h.connections[nodeKey]
+	h.mu.RUnlock()
+	if conn == nil {
+		return ErrNodeOffline
+	}
+	raw, ok := conn.(RawSender)
+	if !ok {
+		return errors.New("connection does not support raw p2p frames")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return raw.SendRaw(ctx, payload)
 }

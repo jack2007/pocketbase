@@ -16,6 +16,16 @@ go run ./apps/raypx2-center serve --http=127.0.0.1:8090
 
 Open <http://127.0.0.1:8090/app/> and sign in with the superuser account.
 
+Remote signaling + coturn tests use `64.176.42.49` (repo at
+`/opt/src/pocketbase`). Start Center with:
+
+```bash
+/opt/src/pocketbase/bin/raypx2-center serve --http=0.0.0.0:8443
+```
+
+Host, ports, and coturn relay range are in
+[deploy/test-server.md](../../deploy/test-server.md).
+
 The compiled UI is committed under `ui/dist`, so Node.js is not required to
 serve the center. To change the UI:
 

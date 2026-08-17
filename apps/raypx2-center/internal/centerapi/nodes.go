@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/audit"
 	centercrypto "github.com/pocketbase/pocketbase/apps/raypx2-center/internal/crypto"
+	"github.com/pocketbase/pocketbase/apps/raypx2-center/internal/p2p"
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/types"
 )
@@ -46,6 +47,7 @@ func (api *API) HandleCreateNode(e *core.RequestEvent) error {
 		node.Set("role", request.Role)
 		node.Set("labels", request.Labels)
 		node.Set("enroll_secret_hash", hash)
+		node.Set("grant_mac_key", p2p.HexVerifyKey(secret))
 		node.Set("enroll_status", "active")
 		node.Set("online", false)
 		if e.Auth != nil {
@@ -175,6 +177,7 @@ func (api *API) HandleRotateEnroll(e *core.RequestEvent) error {
 			return err
 		}
 		node.Set("enroll_secret_hash", hash)
+		node.Set("grant_mac_key", p2p.HexVerifyKey(secret))
 		node.Set("enroll_status", "active")
 		node.Set("online", false)
 		if err := txApp.Save(node); err != nil {

@@ -286,10 +286,8 @@ func TestTurnserverTemplateUDPOnly(t *testing.T) {
 		"no-tcp-relay",
 		"user-quota=2",
 		"no-multicast-peers",
-		"denied-peer-ip=0.0.0.0-0.0.0.0",
 		"denied-peer-ip=127.0.0.0-127.255.255.255",
 		"denied-peer-ip=169.254.0.0-169.254.255.255",
-		"denied-peer-ip=::",
 		"denied-peer-ip=::1",
 	}
 	for _, want := range required {
@@ -349,10 +347,8 @@ user-quota=2
 #max-port=65535
 
 no-multicast-peers
-denied-peer-ip=0.0.0.0-0.0.0.0
 denied-peer-ip=127.0.0.0-127.255.255.255
 denied-peer-ip=169.254.0.0-169.254.255.255
-denied-peer-ip=::
 denied-peer-ip=::1
 
 # CLI stays disabled: do not set cli-password.

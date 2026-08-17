@@ -98,6 +98,14 @@ func TestCenterRoutesRequireSuperuserAuth(t *testing.T) {
 			expected:       []string{`"data":{}`},
 		},
 		{
+			name:           "unauthenticated POST /api/center/p2p/sessions",
+			method:         http.MethodPost,
+			url:            "/api/center/p2p/sessions",
+			body:           `{"client_node_key":"c","server_node_key":"s"}`,
+			expectedStatus: http.StatusUnauthorized,
+			expected:       []string{`"data":{}`},
+		},
+		{
 			name:           "superuser GET /api/center/apply-jobs",
 			method:         http.MethodGet,
 			url:            "/api/center/apply-jobs",
@@ -165,6 +173,7 @@ func bindCenterAPIRoutes(t testing.TB, _ *tests.TestApp, e *core.ServeEvent) {
 	center.DELETE("/nodes/{node_key}/peers/{peer_id}", api.HandleDeleteNodePeer)
 	center.GET("/templates", api.HandleListTemplates)
 	center.GET("/apply-jobs", api.HandleListApplyJobs)
+	center.POST("/p2p/sessions", api.HandleCreateP2PSession)
 }
 
 func superuserAuthToken(app core.App) (string, error) {
